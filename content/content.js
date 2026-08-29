@@ -7,6 +7,15 @@
   var jobId = null;
   var captchaPaused = false;
   var seenLocal = new Set();
+  var noAnchorStreak = 0;
+  var loopCount = 0;
+  var cyclesUntilPause = 0;
+  var cooldownUsed = false;
+  var lastWaitMs = 0;
+
+  function randBetween(min, max) {
+    return min + Math.random() * (max - min);
+  }
 
   function isMaps() { return /google\.[a-z.]+\/maps/.test(location.href); }
   function getSearch() { return (document.title || '').replace(/\s*-\s*Google Maps\s*$/i, '').trim(); }
@@ -21,6 +30,7 @@
     var sample = [];
     var as = document.querySelectorAll('a[href*="maps/place"]');
     for (var i = 0; i < Math.min(2, as.length); i++) sample.push(as[i].href.slice(0, 80));
+    var fed = document.querySelector(GMLE.selectors.feed);
     return {
       jobId: jobId,
       isMaps: isMaps(),
@@ -28,7 +38,12 @@
       anchorsPlace: countAnchors(),
       totalAnchors: document.querySelectorAll('a[href^="http"]').length,
       hrefSample: sample,
-      href: location.href.slice(0, 120)
+      href: location.href.slice(0, 120),
+      feedH: fed ? fed.scrollHeight : 0,
+      feedTop: fed ? Math.round(fed.scrollTop) : 0,
+      streak: noAnchorStreak,
+      lastWaitMs: lastWaitMs,
+      cooldownUsed: cooldownUsed
     };
   }
   function detectCaptcha() {
@@ -60,23 +75,58 @@
     return leads;
   }
 
-  function scrollFeed() {
-    var fed = document.querySelector(GMLE.selectors.feed);
-    if (fed) {
-      fed.scrollTop = fed.scrollHeight;
-      if (fed.scrollBy) fed.scrollBy(0, 800);
-    }
-    var root = getFeed();
-    if (root && root !== fed) root.scrollTop = root.scrollHeight;
-    if (window.scrollBy) window.scrollBy(0, 600);
+  // Feed growth signature: scrollHeight + anchor count. Used to detect that a
+  // pagination page actually landed before extracting/scrolling again — this
+  // keeps our requests single-flight (measured healthy baseline in the HAR:
+  // one page per ~6-10s, never a trigger while the previous one is in flight).
+  function feedMetrics() {
+    var fed = document.querySelector(GMLE.selectors.feed) || getFeed();
+    return {
+      h: fed ? fed.scrollHeight : 0,
+      a: countAnchors()
+    };
   }
 
-  var noAnchorStreak = 0;
-  var loopCount = 0;
+  function waitForFeedChange(prev, budgetMs) {
+    var start = Date.now();
+    return new Promise(function (resolve) {
+      function poll() {
+        if (!running) { resolve({ changed: false, waitedMs: Date.now() - start }); return; }
+        var cur = feedMetrics();
+        if (cur.h > prev.h || cur.a > prev.a) { resolve({ changed: true, waitedMs: Date.now() - start }); return; }
+        if (Date.now() - start >= budgetMs) { resolve({ changed: false, waitedMs: Date.now() - start }); return; }
+        setTimeout(poll, cfg.scroll.changeWaitPollMs);
+      }
+      setTimeout(poll, cfg.scroll.changeWaitPollMs);
+    });
+  }
+
+  // Partial, smooth step toward (but never onto) the bottom edge. Maps
+  // paginates when scrolled *near* the bottom; pinning to scrollHeight
+  // leaves the trigger zone in a bad state.
+  function scrollFeedStep() {
+    var fed = document.querySelector(GMLE.selectors.feed);
+    if (!fed) {
+      var root = getFeed();
+      if (root && root.scrollHeight) root.scrollTop = root.scrollHeight;
+      if (window.scrollBy) window.scrollBy(0, 600);
+      return;
+    }
+    var view = fed.clientHeight || 600;
+    var step = view * randBetween(cfg.scroll.stepMin, cfg.scroll.stepMax);
+    var maxTop = Math.max(0, fed.scrollHeight - view);
+    var target = Math.min(
+      fed.scrollTop + step,
+      maxTop - view * randBetween(cfg.scroll.bottomMarginMin, cfg.scroll.bottomMarginMax)
+    );
+    target = Math.max(target, fed.scrollTop); // never scroll up
+    if (target <= fed.scrollTop) return;
+    if (fed.scrollTo) fed.scrollTo({ top: target, behavior: 'smooth' });
+    else fed.scrollTop = target;
+  }
 
   function loop() {
     if (!running) return;
-    console.log('[content] loop#' + loopCount + ' running=' + running);
 
     if (captchaPaused) {
       if (!detectCaptcha()) {
@@ -94,37 +144,66 @@
       return;
     }
 
+    var prev = feedMetrics();
     var leads = [];
     try {
       leads = extractAll();
     } catch (e) {
       console.error('[content] extractAll threw:', e);
     }
-    console.log('[content] loop#' + loopCount + ' anchors=' + countAnchors() + ' leads=' + leads.length + ' seen=' + seenLocal.size);
     if (leads.length) {
-      noAnchorStreak = 0;
       GMLE.post(GMLE.MSG.LEADS_DISCOVERED, { jobId: jobId, leads: leads });
-    } else {
-      noAnchorStreak++;
     }
 
-    loopCount++;
-    if (loopCount % 3 === 0) GMLE.post(GMLE.MSG.DIAG, diag());
+    // Single-flight wait: hold until the next page actually lands (or the
+    // budget expires). A "dead" cycle = no new leads AND no feed growth.
+    var budget = randBetween(cfg.scroll.changeWaitMinMs, cfg.scroll.changeWaitMaxMs);
+    waitForFeedChange(prev, budget).then(function (res) {
+      if (!running) return;
+      lastWaitMs = res.waitedMs;
+      if (res.changed || leads.length) noAnchorStreak = 0;
+      else noAnchorStreak++;
+      waitDone();
+    });
 
-    if (detectEnd()) {
-      GMLE.post(GMLE.MSG.DONE, { jobId: jobId, reason: 'end' });
-      running = false;
-      return;
-    }
-    if (noAnchorStreak >= 6) {
-      GMLE.post(GMLE.MSG.DIAG, Object.assign({ reason: 'no-anchors-found' }, diag()));
-      GMLE.post(GMLE.MSG.DONE, { jobId: jobId, reason: 'no-results' });
-      running = false;
-      return;
-    }
+    function waitDone() {
+      loopCount++;
+      if (loopCount % 3 === 0) GMLE.post(GMLE.MSG.DIAG, diag());
 
-    scrollFeed();
-    setTimeout(loop, cfg.scroll.afterScrollMs);
+      if (detectEnd()) {
+        GMLE.post(GMLE.MSG.DONE, { jobId: jobId, reason: 'end' });
+        running = false;
+        return;
+      }
+      if (noAnchorStreak >= cfg.scroll.maxConsecutiveNoNew) {
+        GMLE.post(GMLE.MSG.DIAG, Object.assign({ reason: 'no-anchors-found' }, diag()));
+        GMLE.post(GMLE.MSG.DONE, { jobId: jobId, reason: 'no-results' });
+        running = false;
+        return;
+      }
+
+      var proceed = function () {
+        if (!running) return;
+        scrollFeedStep();
+        var delay = randBetween(cfg.scroll.minDelayMs, cfg.scroll.maxDelayMs);
+        cyclesUntilPause--;
+        if (cyclesUntilPause <= 0) {
+          // occasional "reading pause" — irregular, human-like
+          delay += randBetween(cfg.scroll.readPauseMinMs, cfg.scroll.readPauseMaxMs);
+          cyclesUntilPause = Math.round(randBetween(cfg.scroll.readPauseEveryMin, cfg.scroll.readPauseEveryMax));
+        }
+        setTimeout(loop, delay);
+      };
+
+      // One cooldown per run: throttled feeds often resume after a pause.
+      if (noAnchorStreak >= cfg.scroll.stallCooldownAfter && !cooldownUsed) {
+        cooldownUsed = true;
+        GMLE.post(GMLE.MSG.DIAG, Object.assign({ reason: 'stall-cooldown' }, diag()));
+        setTimeout(proceed, cfg.scroll.stallCooldownMs);
+        return;
+      }
+      proceed();
+    }
   }
 
   GMLE.onMessage(function (msg) {
@@ -137,6 +216,9 @@
       seenLocal = new Set();
       noAnchorStreak = 0;
       loopCount = 0;
+      cooldownUsed = false;
+      lastWaitMs = 0;
+      cyclesUntilPause = Math.round(randBetween(cfg.scroll.readPauseEveryMin, cfg.scroll.readPauseEveryMax));
       GMLE.post(GMLE.MSG.DIAG, diag());
       loop();
     } else if (type === GMLE.MSG.STOP) {
@@ -147,6 +229,8 @@
 
   if (isMaps()) {
     sendStatus();
+    // Keep broadcasting Maps status while idle so the overlay UI can gate
+    // the START button on a fresh search.
     setInterval(function () { if (!running) sendStatus(); }, 2500);
   }
 })();

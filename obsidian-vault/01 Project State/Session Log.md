@@ -4,6 +4,21 @@ type: session-log
 
 # Session Log
 
+## 2026-08-29 — Fix: feed stall at ~50-60 leads (humanized adaptive scroll loop)
+- **Root cause (HAR RCA, `www.google.com.txt`):** manual healthy flow paginates every ~6–10 s, strictly single-flight, partial scrolls, zero errors; the extension hard-jumped `scrollTop = scrollHeight` every fixed 1.2 s, firing pagination triggers while the previous `/search` page was in flight → Maps' single-flight feed loader dropped them → spinner wedged after ~4–6 pages (≈50–60 leads). All aborted requests in the HAR were benign (autocomplete, superseded tile streams).
+- **Fix in `content/content.js`:** (1) `scrollFeedStep()` — partial smooth `scrollTo` landing 15–35% of viewport above the bottom, never pins to absolute bottom, never scrolls up; (2) `waitForFeedChange()` — single-flight wait polling feed `scrollHeight`/anchor count (pure measurement, D-004-safe) until the next page lands or an 8–12 s budget expires; (3) randomized cadence 2.5–5.5 s + irregular "reading pauses" (4–9 s every 5–9 cycles, rolling counter — no metronomic pattern); (4) one 25 s stall cooldown after 3 dead cycles, `DONE no-results` after 8; (5) `diag()` now carries `feedH/feedTop/streak/lastWaitMs/cooldownUsed` for the debug drawer.
+- **Fix in `modules/config.js`:** replaced `scroll` block with the humanized pacing params (documented inline with the HAR rationale); `afterScrollMs`/old `maxConsecutiveNoNew` removed (no other references).
+- **Verified with mocked-DOM Node harness (shrunk timers):** happy path — 6 `LEADS_DISCOVERED` batches, 30 leads, feed growth resets streak, `DONE 'end'` at end-of-results; stall path — streak reaches 8, single cooldown DIAG fires once, `DONE 'no-results'`. `node --check` passes; `afterScrollMs` fully removed.
+**Completed:** Loop rework implemented + logic verified in mock; trade-off accepted: ~500 leads now takes ~3–4 min (25–30 pages × ~6–9 s) — that is the fix, not a regression.
+**Pending:** User live run to 100+ leads to confirm no wedge; observe cadence in debug Events tab; confirm XLSX export.
+**Blocker:** None.
+**Next:** Live verification; then back to `extractors.js` live-DOM tuning.
+
+## 2026-08-29 — Git init + pushed to GitHub
+- Initialized git repo (branch `main`), added `.gitignore` (build artifacts, logs, OS junk, `.env`, `.zcode/` local plans), created the initial commit (V2 overlay UI state), created the private GitHub repo `SyedMustafaqadri/GMap-lead-scraper` via API using the stored Git Credential Manager token, and pushed `main` (upstream set).
+**Completed:** Remote https://github.com/SyedMustafaqadri/GMap-lead-scraper — repo is **private**; flip to public in Settings if desired.
+**Next:** Continue V2 verification / extraction tuning; commit future work normally.
+
 ## 2026-08-29 — Fix: no phone numbers extracted (PK-only regex)
 - **Root cause:** `_phoneFromText` in `content/extractors.js` only matched Pakistani formats (`+92 …` or leading-`0`), so international formats (`(204) 555-7391`, `+1 416-555-0199`, `+44 20 …`) never matched; even PK `(042) 3575-5012` failed because `)` after the area code wasn't an allowed separator.
 - **Fix:** (1) prefer a `tel:` link inside the card when present (`a[href^="tel:"]` — the D-004 stable hook, previously unused by the extractor). (2) New international regex: optional country code / area-code parens / leading-0 trunk prefix, greedy digit run with up to 3 separator splits, validated by total digit count (7–15) to reject ratings/hours/address numbers. (3) Matching runs **per card line** (lines joined with `\n`) — the phone sits on its own line, preventing gluing to street numbers; a `+`-form match always wins over a fallback.
