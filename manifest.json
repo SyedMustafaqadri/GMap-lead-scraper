@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "Google Maps Lead Extractor",
+  "version": "0.2.0",
+  "description": "Extract Google Maps leads into .xlsx. Local-first and private.",
+  "permissions": ["storage", "scripting", "downloads", "activeTab"],
+  "host_permissions": [
+    "https://www.google.com/maps/*",
+    "https://maps.google.com/*",
+    "<all_urls>"
+  ],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Google Maps Lead Extractor" },
+  "content_scripts": [
+    {
+      "matches": ["https://www.google.com/maps/*", "https://maps.google.com/*"],
+      "js": [
+        "modules/config.js",
+        "modules/messaging.js",
+        "modules/dedupe.js",
+        "modules/debug.js",
+        "modules/storage.js",
+        "modules/stateMachine.js",
+        "content/selectors.js",
+        "content/extractors.js",
+        "content/content.js",
+        "overlay/overlayDebug.js",
+        "overlay/overlay.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["overlay/overlay.css"],
+      "matches": ["https://www.google.com/*", "https://maps.google.com/*"]
+    }
+  ]
+}

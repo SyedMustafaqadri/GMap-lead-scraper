@@ -1,0 +1,20 @@
+# Packaging / build artifacts
+node_modules/
+dist/
+build/
+web-ext-artifacts/
+*.zip
+*.crx
+*.pem
+
+# Logs
+*.log
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local secrets
+.env
+.zcode/

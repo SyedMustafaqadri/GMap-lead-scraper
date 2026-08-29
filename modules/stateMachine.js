@@ -1,0 +1,28 @@
+self.GMLE = self.GMLE || {};
+
+GMLE.States = {
+  IDLE: 'IDLE',
+  INITIALIZING: 'INITIALIZING',
+  RUNNING: 'RUNNING',
+  PAUSED: 'PAUSED',
+  CAPTCHA: 'CAPTCHA',
+  STOPPING: 'STOPPING',
+  COMPLETING: 'COMPLETING',
+  COMPLETED: 'COMPLETED',
+  ERROR: 'ERROR'
+};
+
+GMLE.canTransition = function (from, to) {
+  var map = {
+    IDLE: ['INITIALIZING', 'ERROR'],
+    INITIALIZING: ['RUNNING', 'STOPPING', 'ERROR'],
+    RUNNING: ['PAUSED', 'CAPTCHA', 'STOPPING', 'ERROR', 'COMPLETED'],
+    PAUSED: ['RUNNING', 'STOPPING'],
+    CAPTCHA: ['RUNNING', 'STOPPING'],
+    STOPPING: ['COMPLETING', 'COMPLETED'],
+    COMPLETING: ['COMPLETED', 'ERROR'],
+    COMPLETED: ['IDLE'],
+    ERROR: ['IDLE']
+  };
+  return (map[from] || []).indexOf(to) !== -1;
+};
