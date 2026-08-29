@@ -4,6 +4,15 @@ type: session-log
 
 # Session Log
 
+## 2026-08-29 — Fix v2: scroll never reached the pagination trigger (only ~8 leads)
+- **Root cause of the regression:** v1's `scrollFeedStep()` capped the scroll target at `maxTop - view×(0.15–0.35)` — it could **never reach Maps' pagination trigger at the bottom**. Result: no page ever loaded, every cycle burned its full 8–12 s wait budget on nothing, and the run crawled to `DONE no-results` with just the initially-loaded ~8 leads (user-confirmed: "halfway scrolling, not full down").
+- **Fix:** (1) `scrollFeedStep()` now approaches the bottom in smooth 0.8–1.5×-viewport steps and, when within ~1.5 viewports, glides fully to the bottom — reaching the bottom *is* the pagination trigger; the margin cap is gone. (2) `waitForFeedChange` treats grow-**or-shrink** as "page landed" (Maps can virtualize early cards away). (3) Speed tuning in `modules/config.js`: base delay 1.5–3.5 s (was 2.5–5.5), change-wait budget 5–8 s with 300 ms polling (was 8–12 s/500 ms), reading pauses 3–6 s every 8–14 cycles, cooldown 20 s. Effective pace ≈ 2.5–5 s/page — ~2× faster than the manual baseline but still variable and single-flight.
+- **Verified with bottom-triggered mock** (feed grows only when scrolled to the very bottom — the old logic extracts nothing new here): 595 leads extracted continuously, no premature `no-results`, clean `DONE 'end'` on end-of-results. `node --check` passes; `bottomMargin*` config keys removed.
+**Completed:** Scroll trigger + pacing fixed and mock-verified.
+**Pending:** User live run to confirm real-Maps behavior and throughput.
+**Blocker:** None.
+**Next:** Live verification; further tuning only from a real-session HAR if needed.
+
 ## 2026-08-29 — Fix: feed stall at ~50-60 leads (humanized adaptive scroll loop)
 - **Root cause (HAR RCA, `www.google.com.txt`):** manual healthy flow paginates every ~6–10 s, strictly single-flight, partial scrolls, zero errors; the extension hard-jumped `scrollTop = scrollHeight` every fixed 1.2 s, firing pagination triggers while the previous `/search` page was in flight → Maps' single-flight feed loader dropped them → spinner wedged after ~4–6 pages (≈50–60 leads). All aborted requests in the HAR were benign (autocomplete, superseded tile streams).
 - **Fix in `content/content.js`:** (1) `scrollFeedStep()` — partial smooth `scrollTo` landing 15–35% of viewport above the bottom, never pins to absolute bottom, never scrolls up; (2) `waitForFeedChange()` — single-flight wait polling feed `scrollHeight`/anchor count (pure measurement, D-004-safe) until the next page lands or an 8–12 s budget expires; (3) randomized cadence 2.5–5.5 s + irregular "reading pauses" (4–9 s every 5–9 cycles, rolling counter — no metronomic pattern); (4) one 25 s stall cooldown after 3 dead cycles, `DONE no-results` after 8; (5) `diag()` now carries `feedH/feedTop/streak/lastWaitMs/cooldownUsed` for the debug drawer.

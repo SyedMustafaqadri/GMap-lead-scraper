@@ -10,25 +10,23 @@ GMLE.config = {
   },
   scroll: {
     // Humanized pacing — sized from HAR analysis of a healthy manual session
-    // (pagination every ~6-10s, single-flight, partial scrolls). Pinning to
-    // the absolute bottom at a fixed 1.2s cadence wedges Maps' feed loader
-    // after ~50-60 leads.
-    minDelayMs: 2500,
-    maxDelayMs: 5500,
-    readPauseEveryMin: 5,
-    readPauseEveryMax: 9,
-    readPauseMinMs: 4000,
-    readPauseMaxMs: 9000,
-    changeWaitPollMs: 500,
-    changeWaitMinMs: 8000,
-    changeWaitMaxMs: 12000,
+    // (pagination every ~6-10s, single-flight). v2 tuning: the scroll still
+    // reaches the actual bottom (that IS the pagination trigger) but steps in
+    // smoothly and only scrolls again once the next page has landed.
+    minDelayMs: 1500,
+    maxDelayMs: 3500,
+    readPauseEveryMin: 8,
+    readPauseEveryMax: 14,
+    readPauseMinMs: 3000,
+    readPauseMaxMs: 6000,
+    changeWaitPollMs: 300,
+    changeWaitMinMs: 5000,
+    changeWaitMaxMs: 8000,
     stallCooldownAfter: 3,
-    stallCooldownMs: 25000,
+    stallCooldownMs: 20000,
     maxConsecutiveNoNew: 8,
-    bottomMarginMin: 0.15,
-    bottomMarginMax: 0.35,
-    stepMin: 0.6,
-    stepMax: 1.2,
+    stepMin: 0.8,
+    stepMax: 1.5,
     idleTimeoutMs: 300000
   },
   captchaPollMs: 2000,

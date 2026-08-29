@@ -87,13 +87,15 @@
     };
   }
 
+  // Grow-OR-shrink counts as "a page landed": Maps may virtualize early cards
+  // away (height shrinks) while appending new ones.
   function waitForFeedChange(prev, budgetMs) {
     var start = Date.now();
     return new Promise(function (resolve) {
       function poll() {
         if (!running) { resolve({ changed: false, waitedMs: Date.now() - start }); return; }
         var cur = feedMetrics();
-        if (cur.h > prev.h || cur.a > prev.a) { resolve({ changed: true, waitedMs: Date.now() - start }); return; }
+        if (cur.h !== prev.h || cur.a !== prev.a) { resolve({ changed: true, waitedMs: Date.now() - start }); return; }
         if (Date.now() - start >= budgetMs) { resolve({ changed: false, waitedMs: Date.now() - start }); return; }
         setTimeout(poll, cfg.scroll.changeWaitPollMs);
       }
@@ -101,9 +103,9 @@
     });
   }
 
-  // Partial, smooth step toward (but never onto) the bottom edge. Maps
-  // paginates when scrolled *near* the bottom; pinning to scrollHeight
-  // leaves the trigger zone in a bad state.
+  // Step smoothly down the feed; when close enough, glide fully to the
+  // bottom — reaching the bottom IS the pagination trigger, so never stop
+  // short of it (an earlier margin cap prevented loading entirely).
   function scrollFeedStep() {
     var fed = document.querySelector(GMLE.selectors.feed);
     if (!fed) {
@@ -113,13 +115,13 @@
       return;
     }
     var view = fed.clientHeight || 600;
-    var step = view * randBetween(cfg.scroll.stepMin, cfg.scroll.stepMax);
     var maxTop = Math.max(0, fed.scrollHeight - view);
-    var target = Math.min(
-      fed.scrollTop + step,
-      maxTop - view * randBetween(cfg.scroll.bottomMarginMin, cfg.scroll.bottomMarginMax)
-    );
-    target = Math.max(target, fed.scrollTop); // never scroll up
+    var distance = maxTop - fed.scrollTop;
+    var step = view * randBetween(cfg.scroll.stepMin, cfg.scroll.stepMax);
+    var target = (distance <= step || distance <= view * 1.5)
+      ? maxTop                      // in reach — glide to the bottom
+      : fed.scrollTop + step;       // gradual human-like approach
+    target = Math.min(target, maxTop);
     if (target <= fed.scrollTop) return;
     if (fed.scrollTo) fed.scrollTo({ top: target, behavior: 'smooth' });
     else fed.scrollTop = target;

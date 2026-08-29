@@ -18,7 +18,7 @@ Implementation → [[06 Modules/Overlay UI]] + [[06 Modules/Debug]] complete, aw
 - **2026-08-29 — V2 UI overhaul:** side panel removed; floating Shadow-DOM overlay (`overlay/`) with trigger button; toolbar-click toggle with executeScript fallback; export moved to the service worker (lazy SheetJS); state rehydration via `REQUEST_STATUS`; dev debug drawer (`GMLE.DEV_MODE` flag) with State/Events/Log tabs fed by `modules/debug.js` trace tap; settings persistence. Manifest bumped to 0.2.0. All JS passes `node --check`.
 
 ## In Progress
-- Live verification of the humanized scroll loop (2026-08-29): user runs a real search to 100+ leads to confirm the feed no longer wedges at ~50–60.
+- Live verification of scroll loop v2 (2026-08-29): reaches the pagination trigger at the bottom, single-flight waits, ~2.5–5 s/page. User to run a real extraction past 100 leads.
 
 ## Pending
 - User live run to confirm: no spinner wedge past 60 leads, pagination cadence ~5–10 s/page in the debug Events tab, XLSX export on completion.

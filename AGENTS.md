@@ -1,5 +1,7 @@
 # AGENTS.md — Project Memory & Build Context
 
+do not overthink, do not do overcorrection, overengineering, overplanning, or overoptimization. 
+
 ## Where to get current state
 
 This file does **not** track current status. Before planning or doing any work, load the live state from these sources:
