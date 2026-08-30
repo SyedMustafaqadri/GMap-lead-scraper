@@ -7,30 +7,30 @@ status: active
 # Project State
 
 ## Current Objective
-V2 UI: replace the side panel with a floating, collapsible overlay panel on Google Maps pages plus a dev-only debug section — implemented; live browser verification pending.
+Implement the planned **two-phase detail scraping** (phase 1 scroll+extract as today; phase 2 click each place and scrape the detail panel for phone/website/address) plus **per-part card classification** — full spec in [[08 Tasks/Next Session Prompt — Two-Phase Detail Scraping]].
 
 ## Current Module / Step
-Implementation → [[06 Modules/Overlay UI]] + [[06 Modules/Debug]] complete, awaiting live verification. Extraction-DOM tuning (selectors/extractors) still open from 2026-08-26.
+Handoff prepared (2026-08-30): DOM reference updated with the full live capture (feed card + detail panel hooks); next session starts from the handoff prompt. Current committed code is stable (commit 3c928d9, not pushed — user asked to hold).
 
 ## Completed
-- Specs, vault seed, DOM analysis, stable-hook strategy ([[03 Decisions/Decision Log|D-004]]).
-- Extension MVP scaffold + field parsing fixes + pipeline fixes (see [[01 Project State/Session Log]], 2026-08-26).
-- **2026-08-29 — V2 UI overhaul:** side panel removed; floating Shadow-DOM overlay (`overlay/`) with trigger button; toolbar-click toggle with executeScript fallback; export moved to the service worker (lazy SheetJS); state rehydration via `REQUEST_STATUS`; dev debug drawer (`GMLE.DEV_MODE` flag) with State/Events/Log tabs fed by `modules/debug.js` trace tap; settings persistence. Manifest bumped to 0.2.0. All JS passes `node --check`.
+- All fixes through 2026-08-30 (see Session Log): overlay UI v2, scroll pacing, SW export, stale-job liveness check, hidden-tab heartbeat, dev drawer.
+- 2026-08-30 analysis: restaurant vs clinic card layouts documented; detail-page fetch approach diagnosed as silently intercepted (page SW/CSP) → replaced by two-phase UI visiting decision (user's idea, endorsed).
 
 ## In Progress
-- Live verification of 2026-08-29 fixes: detail-page phone/website enrichment, SW job restore (Stop robustness), feed-lost resilience, category/address cleanup. User to run a real extraction.
+- Nothing in code — awaiting the new session that implements [[08 Tasks/Next Session Prompt — Two-Phase Detail Scraping]].
 
 ## Pending
-- User live run: confirm Phone/Website columns fill from detail pages, Stop works mid-run, extraction survives opening a place page / filter changes.
-- Live-Maps capture (complete card, scroll container, end-of-results, CAPTCHA markers) → finalize `extractors.js`.
+- New session: per-part card classification + two-phase detail visiting (spec in the handoff note).
+- Live verification: restaurant run (phones/websites fill, clean Category/Address), clinic run (no regression).
+- GitHub push on user's word (commits 08f71c3..3c928d9 are local-only).
 
 ## Blocked
 - (none)
 
 ## Next Actions
-1. User reloads the unpacked extension and runs a real extraction (target ~100).
-2. Check CSV: Phone + Website columns populate; Category/Address contain no rating/price/attribute garbage.
-3. Mid-run: click Stop (should finalize + export) and open a place page (extraction should resume after returning).
+1. Open a fresh session and paste the prompt from [[08 Tasks/Next Session Prompt — Two-Phase Detail Scraping]].
+2. After implementation + tests, user live-verifies both search types.
+3. Push to GitHub when the user says.
 
 ## Last Verified
 2026-08-29

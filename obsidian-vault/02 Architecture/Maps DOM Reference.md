@@ -40,6 +40,43 @@ From the `data-late-css` block and body:
 ## Recommended extraction strategy (see D-004)
 Centralized in `content/selectors.js`. Prefer, in order: `itemprop` microdata → ARIA roles → `href`/`tel:`/`/maps/place/` patterns → text heuristics. Wrap each field extraction in try/catch; on unknown structure, log a warning and leave the field blank (per spec §30: missing field doesn't invalidate a lead). Mark all fields "best-effort until verified on live Maps."
 
+---
+
+# FULL DOM CAPTURE (2026-08-30, pasted from live "clinic" search — feed + opened detail panel)
+
+> Source: user-pasted DevTools HTML of a live clinic search (feed cards + the detail panel of "The Dental Clinic Dr. Saqib Minhas"). Supersedes the truncated 2026-08-26 analysis above. Class names below are STILL minified/rotating — use only the aria/role/data-item-id hooks.
+
+## Feed card (div[role="article"])
+- **Card:** `div[role="article"]`. **Place anchor:** `a` with `href` containing `/maps/place/` (may carry `rclk=1` on ad cards); `aria-label` = place name; inner `span` = name text.
+- **Sponsored cards must be skipped:** the card contains `h1[aria-label="Sponsored"]`. Their "website" link is an ad redirect (`href="/aclk?..."`), not the business site.
+- **Rating/reviews (structured, stable):** `span[role="img"][aria-label="4.7 stars 243 Reviews"]` — parse the aria-label. Inner spans (minified) hold rating `4.7` and count `(243)`.
+- **Info lines:** plain `div`s whose innerText is `part · part · part` (the `·` separators are `span[aria-hidden="true"]`). Lines seen:
+  1. `Category · [attribute glyph] · Address` — e.g. `Dental clinic · [wheelchair icon] · B276, Street 4 Shahjahan Ave`
+  2. `Status · Phone` — e.g. `Closed · Opens 10 AM Mon · <phone>`; status colored span (`Closed` red / `Open` green / `Opens soon`); **phone lives in the last span of this line** (e.g. `0331 2048149`, `+92 21 36641625`).
+- **Website (feed card):** `a[data-value="Website"]` with `aria-label="Visit <name>'s website"` — **real href when organic** (e.g. `https://toclinic.net/`); `/aclk?` href when ad. Cards without a site have only `Directions` (`button[data-value="Directions"]`).
+- **Review quote:** `div` containing a quoted snippet (e.g. `"Truly caring and experienced."`).
+- **LAYOUT VARIANTS (critical, 2026-08-30 live runs):**
+  - **Clinic layout:** renders the phone line (cards carry phone numbers) → card-text phone regex works.
+  - **Restaurant layout:** NO phone line; line 1 joins rating+price: `4.7(4,699) · Rs 1,000–7,000`, then `Restaurant · B231 Johar Hill Rd`, then `Open · Closes 1:30 AM`, then review quote. innerText-line classification must therefore work on **parts (split `·`)**, not whole lines.
+- **Feed footer:** `button[role="checkbox"]` "Update results when map moves" (leave untouched/unchecked).
+
+## Detail panel (opens after clicking a place; SPA, same document)
+- **Panel:** a **second** `div[role="main"]` whose `aria-label` = place name (feed's main has `role="feed"` inside). Class names minified.
+- **Name:** `h1` inside the panel (aria-label/panel aria-label is the stable hook).
+- **Rating/reviews:** `span[role="img"][aria-label="248 reviews"]` next to the rating number.
+- **Address (STABLE):** `button[data-item-id="address"]` → `aria-label="Address: <full address>"`; inner `div` holds the text. Much better quality than the card's truncated address.
+- **Phone (STABLE pattern, verify live):** info rows use `button[data-item-id="phone:tel:<number>"]` → text/aria-label holds the display number. (Pattern proven by the address row; phone row was below the paste cutoff.)
+- **Website (STABLE pattern):** `a[data-item-id^="authority"]` → `href` is the business site. (Classic Maps hook; verify live.)
+- **Category:** a button whose `jsaction` ends in `.category` (minified class) — text is the category.
+- **Hours:** `div` with the clock icon + `table` of weekday rows — not needed for export.
+- **Close:** `button[aria-label="Close"]` at the panel top. History back also restores the feed.
+
+## Implications for the next feature (two-phase detail visiting)
+1. Card parsing must be **part-based** (split lines on `·`, classify each part) — line-level filters broke on the restaurant layout (`4.7(4,699) · Rs 1,000–7,000` leaked into Category/Address on the 2026-08-30 restaurant run).
+2. Skip `[aria-label="Sponsored"]` cards entirely.
+3. Phones/websites for layouts without card-level data: click the card → scrape the detail panel (`data-item-id` hooks) → close → wait for `[role="feed"]` to return. Do NOT fetch the place URL from the page — it was silently intercepted (page service worker / CSP) and returned no place data (2026-08-30 restaurant run: zero phones, zero errors).
+4. Card-level website hook `a[data-value="Website"]` can fill website without visiting (when present and not an ad).
+
 ## Related
 - [[05 Pitfalls/Do Not Guess DOM]]
 - [[02 Architecture/Architecture Map]]

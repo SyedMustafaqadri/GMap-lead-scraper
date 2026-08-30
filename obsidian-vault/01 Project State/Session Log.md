@@ -4,6 +4,16 @@ type: session-log
 
 # Session Log
 
+## 2026-08-30 — Analysis: restaurant layout breaks parsing; detail-page fetch silently dead → two-phase plan handed off
+- Analyzed user's live logs/CSVs + screenshot + **full DOM paste** (feed cards + detail panel, clinic search). Findings recorded in [[02 Architecture/Maps DOM Reference]] ("FULL DOM CAPTURE 2026-08-30"): card hooks (`span[role="img"][aria-label*="stars"]`, `a[data-value="Website"]`, sponsored marker `h1[aria-label="Sponsored"]`), panel hooks (`button[data-item-id="address"]`, `button[data-item-id^="phone"]`, `a[data-item-id^="authority"]`, `button[aria-label="Close"]`, panel = `div[role="main"]` with place-name aria-label).
+- **Diagnosis 1:** restaurant cards use a different line composition (`4.7(4,699) · Rs 1,000–7,000` on one line) → line-level filters leak garbage into Category/Address and eat the real data line. Needs per-part classification.
+- **Diagnosis 2:** detail-page `fetch()` from the content script returned no place data on the restaurant run (zero phones/websites, zero errors) — page service worker / CSP interception suspected; silent catch hid it. Clinic run unaffected (cards carry phones).
+- **Decision (with user):** replace HTML fetching with **two-phase UI visiting** — phase 1 scroll+extract, phase 2 click each place → scrape detail panel (phone/website/better address via `data-item-id` hooks) → close → next. Full handoff prompt saved at [[08 Tasks/Next Session Prompt — Two-Phase Detail Scraping]] for a fresh session. No code written yet (user asked analysis only).
+**Completed:** DOM reference updated with full capture; handoff prompt authored and saved to vault.
+**Pending:** Next session: implement the two-phase feature + per-part card parsing per the handoff prompt; user live-verifies on restaurant + clinic searches.
+**Blocker:** None.
+**Next:** New session — start from [[08 Tasks/Next Session Prompt — Two-Phase Detail Scraping]].
+
 ## 2026-08-29 — Fix: stale job resurrected on fresh browser (overlay "resumes" old run; Stop stuck)
 - **Root cause (user report):** closing the browser mid-run left `chrome.storage.currentJobId` set (it was only cleared on clean COMPLETED). After a full browser restart, opening the overlay fired `REQUEST_STATUS` → `ensureJobRestored()` rebuilt **yesterday's dead job as RUNNING** → overlay showed the old progress with a live Stop button. Stop then marked it STOPPING and sent STOP to the tab, but the fresh content script's `jobId` was null → its `DONE` matched nothing → job stuck in STOPPING forever.
 - **Fix — liveness-checked restore:** `ensureJobRestored(notifyTabId)` now sends `CHECK_JOB {jobId}` to the stored job's tab and waits ~1.2 s for `JOB_ACK`. The content script acks **only** when `running && payload.jobId === jobId` (a genuinely live loop — the legit mid-run SW-restart case). No ack → **stale**: job removed from memory, storage pointer cleared, `STATE_CHANGED IDLE` posted to the requesting overlay (which resets to Idle; the old checkpointed leads remain exportable via the `REQUEST_EXPORT` storage fallback). New message types `CHECK_JOB`/`JOB_ACK`; STOP and REQUEST_STATUS pass the requesting tab id for the IDLE broadcast.
