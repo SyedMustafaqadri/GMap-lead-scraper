@@ -20,7 +20,12 @@ GMLE.MSG = {
   DEBUG_GET_STATE: 'DEBUG_GET_STATE',
   DEBUG_STATE: 'DEBUG_STATE',
   DEBUG_EVENTS: 'DEBUG_EVENTS',
-  DEBUG_CLEAR: 'DEBUG_CLEAR'
+  DEBUG_CLEAR: 'DEBUG_CLEAR',
+  // Hidden-tab scheduling: content delegates its loop timers to the SW
+  // (Chrome throttles hidden-tab timers to ~1/min; SW->tab messages are
+  // delivered immediately). See gmSleep() in content.js.
+  SCHEDULE_TICK: 'SCHEDULE_TICK',
+  LOOP_TICK: 'LOOP_TICK'
 };
 
 // Context tag for trace/debug: 'sw' in the service worker, 'content' in

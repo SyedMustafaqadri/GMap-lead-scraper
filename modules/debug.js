@@ -82,8 +82,10 @@ GMLE.debug = (function () {
     addEvent: addEvent,
     installTap: function () {
       GMLE._setTraceTap(function (dir, type, payload) {
-        // Skip debug traffic so streaming never feeds back into itself.
-        if (type && type.indexOf('DEBUG_') === 0) return;
+        // Skip debug + scheduler traffic so streaming never feeds back into
+        // itself and the trace stays readable (scheduler ticks every ~300ms).
+        if (!type || type.indexOf('DEBUG_') === 0 ||
+            type === 'SCHEDULE_TICK' || type === 'LOOP_TICK') return;
         addEvent(dir, type, payload);
       });
     },

@@ -364,6 +364,17 @@ GMLE.onMessage(function (msg, sender) {
     });
     return;
   }
+  // Hidden-tab heartbeat: content delegates its loop timers here because
+  // Chrome throttles hidden-tab timers to ~1/min, while SW->tab messages
+  // are delivered instantly. Each round trip also keeps this worker alive.
+  if (type === GMLE.MSG.SCHEDULE_TICK) {
+    var tickDelay = Math.max(50, payload.delayMs || 50);
+    var tickSenderTab = (sender && sender.tab) ? sender.tab.id : null;
+    setTimeout(function () {
+      if (tickSenderTab != null) GMLE.postToTab(tickSenderTab, GMLE.MSG.LOOP_TICK, { tickId: payload.tickId });
+    }, tickDelay);
+    return;
+  }
   if (type === GMLE.MSG.DEBUG_GET_STATE) {
     debugStream = !!payload.stream;
     debugStreamTabId = payload.stream && sender && sender.tab ? sender.tab.id : null;

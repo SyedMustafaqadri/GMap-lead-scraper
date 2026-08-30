@@ -57,15 +57,15 @@ Extraction speed = **how fast Google Maps loads new result pages into the feed**
 
 | Config key | Default | What it controls |
 |---|---|---|
-| `minDelayMs` / `maxDelayMs` | 1500 / 3500 | Randomized pause between scroll cycles (lower = faster, but more bot-like) |
-| `changeWaitPollMs` | 300 | How often we check whether the next page has landed |
-| `changeWaitMinMs` / `changeWaitMaxMs` | 5000 / 8000 | Per-cycle budget for waiting on a page load (resolves early the moment content lands) |
+| `minDelayMs` / `maxDelayMs` | 1000 / 2500 | Randomized pause between scroll cycles (lower = faster, but more bot-like) |
+| `changeWaitPollMs` | 250 | How often we check whether the next page has landed |
+| `changeWaitMinMs` / `changeWaitMaxMs` | 4000 / 6000 | Per-cycle budget for waiting on a page load (resolves early the moment content lands) |
 | `stepMin` / `stepMax` | 0.8 / 1.5 | Scroll step size, as a fraction of the feed viewport |
-| `readPauseEveryMin` / `readPauseEveryMax` + `readPauseMinMs` / `readPauseMaxMs` | every 8–14 cycles, 3–6 s | Occasional "human" pauses (irregular by design) |
-| `stallCooldownAfter` / `stallCooldownMs` | 3 cycles / 20 s | One-time cool-down when the feed stops producing |
+| `readPauseEveryMin` / `readPauseEveryMax` + `readPauseMinMs` / `readPauseMaxMs` | every 10–16 cycles, 2–4 s | Occasional "human" pauses (irregular by design) |
+| `stallCooldownAfter` / `stallCooldownMs` | 3 cycles / 15 s | One-time cool-down when the feed stops producing |
 | `maxConsecutiveNoNew` | 8 | Dead cycles before the job ends as "no results" |
 
-The pacing loop (`content/content.js`) is single-flight by design: extract → wait until the feed actually grows → scroll to the bottom → randomized pause → repeat. Expect roughly **2.5–5 s per page** (~10–20 leads), i.e. ~100 leads in 30–60 s.
+The pacing loop (`content/content.js`) is single-flight by design: extract → wait until the feed actually grows → scroll to the bottom → randomized pause → repeat. Expect roughly **1.5–3 s per page** (~10–20 leads), i.e. ~100 leads in 15–30 s. When the Maps tab is hidden (different window/minimized), loop timing is delegated to the service worker (`SCHEDULE_TICK`/`LOOP_TICK` round trips) because Chrome throttles hidden-tab timers — extraction keeps full speed in the background.
 
 ### Safe ways to go faster
 

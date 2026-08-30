@@ -1,6 +1,6 @@
 # AGENTS.md — Project Memory & Build Context
 
-do not overthink, do not do overcorrection, overengineering, overplanning, or overoptimization. 
+**Core Instruction:** Execute efficiently. Avoid overthinking, overengineering, overplanning, or unnecessary refactoring. Focus strictly on the simplest working solution that meets the requirement.
 
 ## Where to get current state
 
@@ -48,6 +48,25 @@ When a task is completed, the agent MUST update the vault in the same session �
 
 Rules: use ISO dates (YYYY-MM-DD), keep `[[wikilinks]]` between notes, mark claims verified only if actually tested (per Definition of Done), and keep each note internally consistent — no contradictions between sections of the same file.
 
+## Data & Extension Architecture Guardrails
+
+- **Storage & State Safety:** State must rely on local browser storage (`chrome.storage.local` or IndexedDB). Define explicit interfaces/schemas for extension state before writing storage operations, and update `obsidian-vault/02 Architecture/Data Model.md`.
+- **Decoupled Architecture:** Keep Side Panel UI, Service Worker background logic, and Content Script DOM scraping cleanly separated. All communication must pass through structured Chrome extension messaging (`chrome.runtime.sendMessage`).
+- **DOM Stability:** Google Maps DOM changes frequently. Wrap DOM parsers/selectors in resilient fallbacks and write clear error-handling wrappers around content scripts.
+
+## Workflow & Vibe Coding Protocols
+
+- **One Task at a Time:** Focus strictly on the active user request. Avoid refactoring surrounding scripts or unrequested files.
+- **Test & Verification Protocol:**
+  - Run build scripts (`npm run build`) and test suites (`npm test` / unit tests) before marking tasks complete.
+  - If a change breaks extension bundle builds or unit tests, resolve the regression before proceeding.
+  - Write test specs for scraper logic, data normalization, and export utilities (e.g., XLSX formatting) whenever core logic changes.
+- **Git & Atomic Commit Rules:**
+  - Inspect `git status` prior to editing code to avoid clobbering uncommitted progress.
+  - Commit changes in small, self-contained, logical increments.
+  - Standard commit message format: `feat: <brief summary>` or `fix: <brief summary>`.
+- **Definition of Done:** Implemented ≠ Tested ≠ Verified ≠ Integrated ≠ Complete. Never claim a feature is complete without build/test verification or explicit manual confirmation steps logged.
+
 ## Security
 
 This is a Chrome extension that reads third-party web pages (Google Maps) and may fetch external websites. Always:
@@ -57,3 +76,11 @@ This is a Chrome extension that reads third-party web pages (Google Maps) and ma
 - Don't exfiltrate lead data — the product is local-first; user data stays in the browser unless the user explicitly exports.
 - Validate/limit inputs for enrichment fetches (timeouts, size caps) to avoid hangs and memory abuse.
 - Mind privilege separation: Content Script (page context) vs Service Worker (extension context) vs Side Panel (UI) — don't leak internals across boundaries unintentionally.
+
+## Development & Test Commands
+
+```bash
+npm run dev        # Watch build mode for extension development
+npm run build      # Production extension bundle build
+npm test           # Run unit test suite (Jest/Vitest/web-ext checks)
+npm run lint       # Run linter and type-checking scripts

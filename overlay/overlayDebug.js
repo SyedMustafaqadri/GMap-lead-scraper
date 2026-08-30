@@ -68,6 +68,19 @@ if (!GMLE.debugUi) GMLE.debugUi = (function () {
 
   function clearNode(n) { while (n.firstChild) n.removeChild(n.firstChild); }
 
+  function copyToClipboard(text, btn) {
+    var done = function () {
+      var old = btn.textContent;
+      btn.textContent = 'Copied ✓';
+      setTimeout(function () { btn.textContent = old; }, 900);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, function () { fallbackCopy(text, done); });
+    } else {
+      fallbackCopy(text, done);
+    }
+  }
+
   function miniBtn(label, onClick) {
     var b = el('button', 'gm-mini-btn', label);
     b.addEventListener('click', onClick);
@@ -78,6 +91,9 @@ if (!GMLE.debugUi) GMLE.debugUi = (function () {
     clearNode(els.toolbar);
     if (tab === 'state') {
       els.toolbar.appendChild(miniBtn('Refresh', function () { postStream(true); }));
+      els.toolbar.appendChild(miniBtn('Copy', function () {
+        copyToClipboard(snap ? JSON.stringify(snap, null, 2) : '{}', this);
+      }));
       els.toolbar.appendChild(miniBtn('Dump to console', function () {
         console.log('[GMLE debug] snapshot', snap);
       }));
@@ -93,6 +109,7 @@ if (!GMLE.debugUi) GMLE.debugUi = (function () {
       });
       p.classList.toggle('active', paused);
       els.toolbar.appendChild(p);
+      els.toolbar.appendChild(miniBtn('Copy', function () { copyEvents(this); }));
       els.toolbar.appendChild(miniBtn('Clear', function () {
         events.length = 0;
         expandedTs = null;
@@ -123,6 +140,22 @@ if (!GMLE.debugUi) GMLE.debugUi = (function () {
         renderView();
       }));
     }
+  }
+
+  // Copies the visible (filter-respecting) event trace, including payload
+  // content, for pasting into reports or bug descriptions.
+  function copyEvents(btn) {
+    var lines = [];
+    for (var i = 0; i < events.length; i++) {
+      var evt = events[i];
+      if (evFilter && evt.type.toLowerCase().indexOf(evFilter) === -1) continue;
+      var d = dirInfo(evt.dir);
+      lines.push('[' + fmtTs(evt.ts) + '] ' + d.label + ' ' + evt.type + (evt.summary ? '  ' + evt.summary : ''));
+      if (evt.payload !== undefined && evt.payload !== null) {
+        lines.push('    ' + JSON.stringify(evt.payload));
+      }
+    }
+    copyToClipboard(lines.reverse().join('\n') || '(no events)', btn);
   }
 
   function copyLogs(filterInput) {

@@ -21,6 +21,23 @@
     return min + Math.random() * (max - min);
   }
 
+  // ---- hidden-tab-safe sleep ------------------------------------------------
+  // Chrome throttles hidden-tab timers to ~1/min, which would stall the loop
+  // when the user switches windows. When hidden, waits are delegated to the
+  // service worker: SCHEDULE_TICK -> SW setTimeout -> LOOP_TICK round trip.
+  // Messages into a hidden tab are delivered instantly (not throttled), and
+  // the round trips keep the worker alive.
+  var tickSeq = 0;
+  var tickWaiters = {};
+  function gmSleep(ms) {
+    return new Promise(function (resolve) {
+      if (!document.hidden) { setTimeout(resolve, ms); return; }
+      var id = ++tickSeq;
+      tickWaiters[id] = resolve;
+      GMLE.post(GMLE.MSG.SCHEDULE_TICK, { delayMs: Math.round(ms), tickId: id });
+    });
+  }
+
   function isMaps() { return /google\.[a-z.]+\/maps/.test(location.href); }
   function getSearch() { return (document.title || '').replace(/\s*-\s*Google Maps\s*$/i, '').trim(); }
   function getFeed() {
@@ -101,9 +118,9 @@
         var cur = feedMetrics();
         if (cur.h !== prev.h || cur.a !== prev.a) { resolve({ changed: true, waitedMs: Date.now() - start }); return; }
         if (Date.now() - start >= budgetMs) { resolve({ changed: false, waitedMs: Date.now() - start }); return; }
-        setTimeout(poll, cfg.scroll.changeWaitPollMs);
+        gmSleep(cfg.scroll.changeWaitPollMs).then(poll);
       }
-      setTimeout(poll, cfg.scroll.changeWaitPollMs);
+      gmSleep(cfg.scroll.changeWaitPollMs).then(poll);
     });
   }
 
@@ -127,7 +144,7 @@
       : fed.scrollTop + step;       // gradual human-like approach
     target = Math.min(target, maxTop);
     if (target <= fed.scrollTop) return;
-    if (fed.scrollTo) fed.scrollTo({ top: target, behavior: 'smooth' });
+    if (fed.scrollTo) fed.scrollTo({ top: target, behavior: document.hidden ? 'auto' : 'smooth' });
     else fed.scrollTop = target;
   }
 
@@ -160,7 +177,7 @@
         GMLE.post(GMLE.MSG.LEADS_ENRICHED, { jobId: jobId, fp: GMLE.fingerprint(lead), updates: updates });
       }
       phoneFetching = false;
-      if (phoneQueue.length) setTimeout(drainDetailQueue, randBetween(400, 1000));
+      if (phoneQueue.length) gmSleep(randBetween(250, 600)).then(drainDetailQueue);
     });
   }
 
@@ -184,7 +201,7 @@
   function finishJobLocal(reason) {
     var check = function () {
       if (!running) return; // STOP arrived — its own DONE already fired
-      if (phoneQueue.length || phoneFetching) { setTimeout(check, 500); return; }
+      if (phoneQueue.length || phoneFetching) { gmSleep(500).then(check); return; }
       running = false;
       GMLE.post(GMLE.MSG.DONE, { jobId: jobId, reason: reason });
     };
@@ -199,14 +216,14 @@
         captchaPaused = false;
         GMLE.post(GMLE.MSG.RESUMED, { jobId: jobId });
       } else {
-        setTimeout(loop, cfg.captchaPollMs);
+        gmSleep(cfg.captchaPollMs).then(loop);
         return;
       }
     }
     if (detectCaptcha()) {
       captchaPaused = true;
       GMLE.post(GMLE.MSG.CAPTCHA, { jobId: jobId });
-      setTimeout(loop, cfg.captchaPollMs);
+      gmSleep(cfg.captchaPollMs).then(loop);
       return;
     }
 
@@ -242,7 +259,7 @@
       // interaction must not end the job. Bounded by the SW idle watchdog.
       if (!document.querySelector(GMLE.selectors.feed)) {
         GMLE.post(GMLE.MSG.DIAG, Object.assign({ reason: 'feed-lost-waiting' }, diag()));
-        setTimeout(loop, 2000);
+        gmSleep(2000).then(loop);
         return;
       }
 
@@ -266,14 +283,14 @@
           delay += randBetween(cfg.scroll.readPauseMinMs, cfg.scroll.readPauseMaxMs);
           cyclesUntilPause = Math.round(randBetween(cfg.scroll.readPauseEveryMin, cfg.scroll.readPauseEveryMax));
         }
-        setTimeout(loop, delay);
+        gmSleep(delay).then(loop);
       };
 
       // One cooldown per run: throttled feeds often resume after a pause.
       if (noAnchorStreak >= cfg.scroll.stallCooldownAfter && !cooldownUsed) {
         cooldownUsed = true;
         GMLE.post(GMLE.MSG.DIAG, Object.assign({ reason: 'stall-cooldown' }, diag()));
-        setTimeout(proceed, cfg.scroll.stallCooldownMs);
+        gmSleep(cfg.scroll.stallCooldownMs).then(proceed);
         return;
       }
       proceed();
@@ -303,6 +320,10 @@
       running = false;
       phoneQueue.length = 0; // user asked to stop — drop pending detail fetches
       GMLE.post(GMLE.MSG.DONE, { jobId: jobId, reason: 'stop' });
+    } else if (type === GMLE.MSG.LOOP_TICK) {
+      // SW-side sleep finished (hidden-tab scheduling) — release the waiter.
+      var waiter = tickWaiters[payload.tickId];
+      if (waiter) { delete tickWaiters[payload.tickId]; waiter(); }
     }
   });
 
