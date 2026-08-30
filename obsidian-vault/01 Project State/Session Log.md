@@ -4,6 +4,20 @@ type: session-log
 
 # Session Log
 
+# Session Log
+
+## 2026-08-31 — Target-reached runs phase 2 (FINISH) + address-digits false phone fixed
+- **RCA from the restaurant log (03:12, `restaurant` search, target 50):** all 50 leads had `phone: null` — restaurant cards don't render phones, so they only fill via phase-2 panel visits, but reaching the lead target sent a hard **STOP**, which skipped phase 2 entirely (no `phase2-start` in the log). Separately, "Dinky Diner" carried phone `3633936343` — that's the address house-number range `36339-36343 S River Rd` captured by the text-level phone fallback. No other anomalies: stop flow clean, export done.
+- **Fixes (commit `b37d60f`, local only), per the user's minimal-change instructions (no core scraping logic touched):**
+  1. **FINISH state transition:** new `GMLE.MSG.FINISH`. When `handleLeads` sees the target reached, the SW sends FINISH instead of STOP; the content script sets `phase1Done` (the scroll loop stops collecting at its next checkpoint) and transitions via `endOfFeed('target')` → the phase-2 visit queue drains (phones/websites fill) → `DONE 'target'` → finalize → **automatic export**. Manual STOP remains instant-and-export-now by design. `endOfFeed` now routes everything except `'no-results'` straight to `tryPhase2`.
+  2. **Phone matcher vs addresses:** the text-level fallback phone scan now excludes any line containing an address-classified part, so `36339-36343 S River Rd` can never become a phone. All other classification/DOM logic untouched.
+- **Tests:** extractors — Dinky Diner card (no false phone, address/category intact) + diner with a real phone on a non-address line (still captured); SW — target reach sends FINISH to the tab, never STOP; content scenario 9 — FINISH stops phase 1 after one batch, drains both visits, DONE carries `'target'`. All suites pass; `node --check` clean.
+**Completed:** Both restaurant-run gaps fixed with minimal, targeted changes.
+**Pending:** User live test — restaurant search to a target: expect phase 2 to run after the target hits and phones to fill; confirm no address-digit phones anywhere.
+**Blocker:** None.
+**Next:** Live verification; push on user's word.
+
+## 2026-08-31 — Close-less phase-2 visiting (user's idea) + "· Visited link" name cleanup
 ## 2026-08-31 — Close-less phase-2 visiting (user's idea) + "· Visited link" name cleanup
 - **Live confirmation from the 02:05 log:** the dismissal chain failed on the real page — `closeMethod: 'button'` proves synthetic Escape and the outer jsaction span were **ignored** by Maps; only the native Close click worked, and it reset the session again (1 of 33 visits ran; `phase2-close-reset` abort + clean COMPLETED + export at 02:05:20 worked as designed). The user's complaint "phones not scraped" was a downstream effect: the abort left ~32 leads without panel phones/websites (phase-1 phone extraction was fine — every batch in the log has phones). User rejected re-search recovery (bot-detection/DOM-thrash risk) and proposed: **open the panel, never close it**.
 - **Implemented close-less visiting (commit `a5430ee`, local only):** the search feed stays alive in the DOM behind the open panel (verified in live diags: 124 anchors, feedH 25k while a panel was open), so the visit loop now clicks the NEXT card's anchor directly — Maps swaps the panel content in place (place→place SPA navigation pushes forward in history; the reset-triggering close handler is never invoked). After the queue drains: DONE → export → one **courtesy Escape** (fire-and-forget; live Maps ignores it anyway, so the last panel may stay open for the user to close manually — zero risk since everything is already saved).
