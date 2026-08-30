@@ -18,19 +18,19 @@ Implementation → [[06 Modules/Overlay UI]] + [[06 Modules/Debug]] complete, aw
 - **2026-08-29 — V2 UI overhaul:** side panel removed; floating Shadow-DOM overlay (`overlay/`) with trigger button; toolbar-click toggle with executeScript fallback; export moved to the service worker (lazy SheetJS); state rehydration via `REQUEST_STATUS`; dev debug drawer (`GMLE.DEV_MODE` flag) with State/Events/Log tabs fed by `modules/debug.js` trace tap; settings persistence. Manifest bumped to 0.2.0. All JS passes `node --check`.
 
 ## In Progress
-- Live verification of scroll loop v2 (2026-08-29): reaches the pagination trigger at the bottom, single-flight waits, ~2.5–5 s/page. User to run a real extraction past 100 leads.
+- Live verification of 2026-08-29 fixes: detail-page phone/website enrichment, SW job restore (Stop robustness), feed-lost resilience, category/address cleanup. User to run a real extraction.
 
 ## Pending
-- User live run to confirm: no spinner wedge past 60 leads, pagination cadence ~5–10 s/page in the debug Events tab, XLSX export on completion.
+- User live run: confirm Phone/Website columns fill from detail pages, Stop works mid-run, extraction survives opening a place page / filter changes.
 - Live-Maps capture (complete card, scroll container, end-of-results, CAPTCHA markers) → finalize `extractors.js`.
 
 ## Blocked
 - (none)
 
 ## Next Actions
-1. User reloads the unpacked extension and runs a real extraction past 100 leads.
-2. If the feed still stalls, capture a HAR of the extension-driven session and compare against the healthy manual baseline recorded in the 2026-08-29 session log.
-3. Provide fuller DOM capture to finalize `extractors.js` (carried over).
+1. User reloads the unpacked extension and runs a real extraction (target ~100).
+2. Check CSV: Phone + Website columns populate; Category/Address contain no rating/price/attribute garbage.
+3. Mid-run: click Stop (should finalize + export) and open a place page (extraction should resume after returning).
 
 ## Last Verified
 2026-08-29

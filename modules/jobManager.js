@@ -14,7 +14,7 @@ GMLE.jobManager = (function () {
 
   function create(opts) {
     var job = {
-      jobId: genId(),
+      jobId: opts.jobId || genId(),
       tabId: opts.tabId,
       searchQuery: opts.searchQuery || '',
       targetLeads: opts.targetLeads || 0,

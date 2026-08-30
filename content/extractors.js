@@ -20,9 +20,13 @@ GMLE.extractors = {
     var candidates = lines.slice(1).filter(function (l) {
       if (l === name) return false;
       if (l === ratingObj._line) return false;
-      if (/^[\d.()\s]+$/.test(l)) return false;
+      if (this._isRatingLine(l)) return false;   // "4.6", "(23)", "4.6(23)" — incl. comma counts
+      if (/^[\d.,()\s]+$/.test(l)) return false;
+      if (/^(rs|pkr|usd|\$|€|£)\s?[\d,]/i.test(l.trim())) return false; // price ranges ("Rs 1–6,000")
+      if (/(no reviews|family-friendly|dine-?in|take-?away|takeaway|curbside pickup|drive-?through|outdoor seating|no-contact delivery)/i.test(l)) return false;
+      if (/["“”]/.test(l)) return false;         // quoted review snippets
       return true;
-    });
+    }, this);
 
     var statusLine = null;
     for (var i = 0; i < candidates.length; i++) {
@@ -82,6 +86,13 @@ GMLE.extractors = {
     return { rating: rating, reviews: null, _line: null };
   },
 
+  _isRatingLine: function (l) {
+    if (!l) return false;
+    return /^\d(\.\d+)?\(([\d,]+)\)$/.test(l) ||
+      /^\d(\.\d+)?$/.test(l) ||
+      /^\(([\d,]+)\)$/.test(l);
+  },
+
   _phoneFromText: function (text) {
     if (!text) return null;
     // International-tolerant: optional country code, optional area-code parens
@@ -106,8 +117,37 @@ GMLE.extractors = {
     return fallback;
   },
 
+  // Detail-page parsing. The feed card does not always render the phone
+  // (layout-dependent), so the caller fetches the place page and pulls the
+  // phone / website from its HTML.
+  phoneFromHtml: function (html) {
+    if (!html) return null;
+    var m = html.match(/href="tel:([^"]+)"/i);
+    if (m && m[1]) {
+      var tel = m[1].replace(/[^\d+]/g, '');
+      if (tel.replace(/\D/g, '').length >= 7) return tel;
+    }
+    var text = html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ');
+    return this._phoneFromText(text);
+  },
+
+  websiteFromHtml: function (html) {
+    if (!html) return null;
+    var re = /href="(https?:\/\/[^"]+)"/gi;
+    var m;
+    while ((m = re.exec(html))) {
+      var u = m[1].replace(/\\u003d/g, '=').replace(/&amp;/g, '&');
+      if (/google\.[a-z.]+|gstatic\.com|googleapis\.com|schema\.org/i.test(u)) continue;
+      return u.slice(0, 300);
+    }
+    return null;
+  },
+
   _looksLikeAddress: function (s) {
-    if (/(st|street|road|rd|ave|avenue|lane|ln|sector|extension|town|round about|chowrangi|ground|plot|block|phase|scheme|society|colony|bhai|pura)/i.test(s)) return true;
+    if (/\b(st|street|road|rd|ave|avenue|lane|ln|sector|extension|town|round about|chowrangi|ground|plot|block|phase|scheme|society|colony|bhai|pura)\b/i.test(s)) return true;
     if (/,\s/.test(s)) return true;
     if (/\b\d{1,3}[a-z]?\b[\s,]/.test(s)) return true;
     if (/\d/.test(s) && /[a-z]/i.test(s) && s.length > 10) return true;

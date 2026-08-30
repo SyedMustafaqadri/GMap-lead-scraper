@@ -12,6 +12,10 @@
   var cyclesUntilPause = 0;
   var cooldownUsed = false;
   var lastWaitMs = 0;
+  var jobFields = GMLE.FIELDS;
+  var phoneQueue = [];
+  var phoneFetching = false;
+  var detailFetchBlocked = false;
 
   function randBetween(min, max) {
     return min + Math.random() * (max - min);
@@ -127,6 +131,66 @@
     else fed.scrollTop = target;
   }
 
+  // ---- detail-page enrichment (phone/website) ------------------------------
+  // The feed card often does not render the phone (layout-dependent), so we
+  // fetch each place's detail page (same-origin) and pull phone + website
+  // from its HTML. The queue drains in parallel with scrolling, ~1 fetch/s.
+
+  function queueDetailFetch(leads) {
+    if (detailFetchBlocked) return;
+    var wantPhone = jobFields.some(function (f) { return f.key === 'phone'; });
+    var wantSite = jobFields.some(function (f) { return f.key === 'email'; });
+    if (!wantPhone && !wantSite) return;
+    leads.forEach(function (l) {
+      if (!l.mapsUrl) return;
+      if ((wantPhone && !l.phone) || (wantSite && !l.website)) phoneQueue.push(l);
+    });
+    drainDetailQueue();
+  }
+
+  function drainDetailQueue() {
+    if (phoneFetching || !phoneQueue.length || detailFetchBlocked) return;
+    phoneFetching = true;
+    var lead = phoneQueue.shift();
+    fetchDetail(lead.mapsUrl).then(function (res) {
+      var updates = {};
+      if (!lead.phone && res.phone) updates.phone = res.phone;
+      if (!lead.website && res.website) updates.website = res.website;
+      if (updates.phone || updates.website) {
+        GMLE.post(GMLE.MSG.LEADS_ENRICHED, { jobId: jobId, fp: GMLE.fingerprint(lead), updates: updates });
+      }
+      phoneFetching = false;
+      if (phoneQueue.length) setTimeout(drainDetailQueue, randBetween(400, 1000));
+    });
+  }
+
+  function fetchDetail(url) {
+    return fetch(url).then(function (r) { return r.text(); }).then(function (html) {
+      if (/unusual traffic|not a robot|our systems have detected/i.test(html)) {
+        detailFetchBlocked = true;
+        phoneQueue.length = 0;
+        GMLE.post(GMLE.MSG.DIAG, Object.assign({ reason: 'detail-fetch-blocked' }, diag()));
+        return {};
+      }
+      return {
+        phone: GMLE.extractors.phoneFromHtml(html),
+        website: GMLE.extractors.websiteFromHtml(html)
+      };
+    }).catch(function () { return {}; });
+  }
+
+  // Post DONE only once the detail queue has drained, so phones fetched for
+  // the last batches make it into the export.
+  function finishJobLocal(reason) {
+    var check = function () {
+      if (!running) return; // STOP arrived — its own DONE already fired
+      if (phoneQueue.length || phoneFetching) { setTimeout(check, 500); return; }
+      running = false;
+      GMLE.post(GMLE.MSG.DONE, { jobId: jobId, reason: reason });
+    };
+    check();
+  }
+
   function loop() {
     if (!running) return;
 
@@ -155,6 +219,7 @@
     }
     if (leads.length) {
       GMLE.post(GMLE.MSG.LEADS_DISCOVERED, { jobId: jobId, leads: leads });
+      queueDetailFetch(leads);
     }
 
     // Single-flight wait: hold until the next page actually lands (or the
@@ -172,21 +237,28 @@
       loopCount++;
       if (loopCount % 3 === 0) GMLE.post(GMLE.MSG.DIAG, diag());
 
+      // Feed replaced/removed (user opened a place, changed filters, etc.):
+      // wait for it to come back instead of counting dead cycles — user
+      // interaction must not end the job. Bounded by the SW idle watchdog.
+      if (!document.querySelector(GMLE.selectors.feed)) {
+        GMLE.post(GMLE.MSG.DIAG, Object.assign({ reason: 'feed-lost-waiting' }, diag()));
+        setTimeout(loop, 2000);
+        return;
+      }
+
       if (detectEnd()) {
-        GMLE.post(GMLE.MSG.DONE, { jobId: jobId, reason: 'end' });
-        running = false;
+        finishJobLocal('end');
         return;
       }
       if (noAnchorStreak >= cfg.scroll.maxConsecutiveNoNew) {
         GMLE.post(GMLE.MSG.DIAG, Object.assign({ reason: 'no-anchors-found' }, diag()));
-        GMLE.post(GMLE.MSG.DONE, { jobId: jobId, reason: 'no-results' });
-        running = false;
+        finishJobLocal('no-results');
         return;
       }
 
       var proceed = function () {
         if (!running) return;
-        scrollFeedStep();
+        if (document.querySelector(GMLE.selectors.feed)) scrollFeedStep();
         var delay = randBetween(cfg.scroll.minDelayMs, cfg.scroll.maxDelayMs);
         cyclesUntilPause--;
         if (cyclesUntilPause <= 0) {
@@ -213,6 +285,7 @@
     if (type === GMLE.MSG.START) {
       console.log('[content] START received jobId=' + payload.jobId);
       jobId = payload.jobId;
+      jobFields = payload.fields && payload.fields.length ? payload.fields : GMLE.FIELDS;
       running = true;
       captchaPaused = false;
       seenLocal = new Set();
@@ -220,11 +293,15 @@
       loopCount = 0;
       cooldownUsed = false;
       lastWaitMs = 0;
+      phoneQueue.length = 0;
+      phoneFetching = false;
+      detailFetchBlocked = false;
       cyclesUntilPause = Math.round(randBetween(cfg.scroll.readPauseEveryMin, cfg.scroll.readPauseEveryMax));
       GMLE.post(GMLE.MSG.DIAG, diag());
       loop();
     } else if (type === GMLE.MSG.STOP) {
       running = false;
+      phoneQueue.length = 0; // user asked to stop — drop pending detail fetches
       GMLE.post(GMLE.MSG.DONE, { jobId: jobId, reason: 'stop' });
     }
   });

@@ -17,6 +17,41 @@ importScripts(
 var currentJobId = null;
 var mapsStatusByTab = {};
 
+// --- Job restore (MV3 SWs die and restart; jobs live in memory) ------------
+// Chrome may kill the service worker mid-run. On wake, rebuild the active
+// job from IndexedDB so STOP, lead intake, and export keep working. Without
+// this, stopJob() silently no-ops and leads hit "unknown job" after a
+// restart.
+var restorePromise = null;
+function ensureJobRestored() {
+  if (restorePromise) return restorePromise;
+  restorePromise = GMLE.storage.getCurrentJobId().then(function (id) {
+    if (!id || GMLE.jobManager.get(id)) return;
+    return GMLE.storage.getJob(id).then(function (pj) {
+      if (!pj) return;
+      return GMLE.storage.getLeads(id).then(function (leads) {
+        var job = GMLE.jobManager.create({
+          jobId: id,
+          tabId: pj.tabId,
+          searchQuery: pj.searchQuery,
+          targetLeads: pj.targetLeads,
+          fields: GMLE.FIELDS
+        });
+        job.status = pj.status || GMLE.States.RUNNING;
+        job.startedAt = pj.startedAt || Date.now();
+        job.leads = leads;
+        job.savedCount = leads.length;
+        job.seen = new Set(leads.map(function (l) { return l.fingerprint; }));
+        currentJobId = id;
+        GMLE.debug.log('info', 'sw', 'restored job=' + id + ' leads=' + leads.length + ' (SW restart)');
+      });
+    });
+  }).catch(function (e) {
+    GMLE.debug.log('warn', 'sw', 'job restore failed: ' + String(e));
+  });
+  return restorePromise;
+}
+
 // --- Debug/trace hub -------------------------------------------------------
 // The SW sees all message traffic (content -> SW -> overlay), so it owns the
 // trace buffers. While the overlay debug drawer is open it streams new
@@ -239,7 +274,7 @@ function startExtraction(payload, sender) {
     runDemo(job);
     return;
   }
-  GMLE.postToTab(tabId, GMLE.MSG.START, { jobId: job.jobId });
+  GMLE.postToTab(tabId, GMLE.MSG.START, { jobId: job.jobId, fields: job.fields });
   GMLE.debug.log('info', 'sw', 'start job=' + job.jobId + ' tab=' + tabId + ' target=' + job.targetLeads);
   setState(job, GMLE.States.RUNNING);
   GMLE.postToTab(tabId, GMLE.MSG.STATUS_UPDATE, statusPayload(job));
@@ -278,12 +313,16 @@ GMLE.onMessage(function (msg, sender) {
     return;
   }
   if (type === GMLE.MSG.START_EXTRACTION) { startExtraction(payload, sender); return; }
-  if (type === GMLE.MSG.STOP) { stopJob(payload.jobId); return; }
+  if (type === GMLE.MSG.STOP) { ensureJobRestored().then(function () { stopJob(payload.jobId); }); return; }
   if (type === GMLE.MSG.LEADS_DISCOVERED) {
-    handleLeads(payload.jobId, payload.leads);
+    ensureJobRestored().then(function () { handleLeads(payload.jobId, payload.leads); });
     return;
   }
-  if (type === GMLE.MSG.DONE) { finalizeJob(payload.jobId); return; }
+  if (type === GMLE.MSG.LEADS_ENRICHED) {
+    ensureJobRestored().then(function () { handleLeadEnriched(payload); });
+    return;
+  }
+  if (type === GMLE.MSG.DONE) { ensureJobRestored().then(function () { finalizeJob(payload.jobId); }); return; }
   if (type === GMLE.MSG.CAPTCHA) {
     var jc = GMLE.jobManager.get(payload.jobId);
     if (jc) {
@@ -298,7 +337,9 @@ GMLE.onMessage(function (msg, sender) {
     return;
   }
   if (type === GMLE.MSG.REQUEST_EXPORT) {
-    exportJob(payload.jobId, sender && sender.tab ? sender.tab.id : null);
+    ensureJobRestored().then(function () {
+      exportJob(payload.jobId, sender && sender.tab ? sender.tab.id : null);
+    });
     return;
   }
   if (type === GMLE.MSG.DIAG) {
@@ -309,16 +350,18 @@ GMLE.onMessage(function (msg, sender) {
   }
   // The overlay asks for a status snapshot on open (state rehydration).
   if (type === GMLE.MSG.REQUEST_STATUS) {
-    var tabId = (sender && sender.tab) ? sender.tab.id : null;
-    if (currentJobId) {
-      var jobR = GMLE.jobManager.get(currentJobId);
-      if (jobR) {
-        GMLE.postToTab(tabId, GMLE.MSG.STATE_CHANGED, { jobId: jobR.jobId, state: jobR.status, searchQuery: jobR.searchQuery });
-        GMLE.postToTab(tabId, GMLE.MSG.STATUS_UPDATE, statusPayload(jobR));
+    ensureJobRestored().then(function () {
+      var tabId = (sender && sender.tab) ? sender.tab.id : null;
+      if (currentJobId) {
+        var jobR = GMLE.jobManager.get(currentJobId);
+        if (jobR) {
+          GMLE.postToTab(tabId, GMLE.MSG.STATE_CHANGED, { jobId: jobR.jobId, state: jobR.status, searchQuery: jobR.searchQuery });
+          GMLE.postToTab(tabId, GMLE.MSG.STATUS_UPDATE, statusPayload(jobR));
+        }
       }
-    }
-    var msR = tabId != null ? mapsStatusByTab[tabId] : null;
-    GMLE.postToTab(tabId, GMLE.MSG.MAPS_STATUS, msR || { ready: false, search: '', reason: 'unknown' });
+      var msR = tabId != null ? mapsStatusByTab[tabId] : null;
+      GMLE.postToTab(tabId, GMLE.MSG.MAPS_STATUS, msR || { ready: false, search: '', reason: 'unknown' });
+    });
     return;
   }
   if (type === GMLE.MSG.DEBUG_GET_STATE) {
@@ -340,6 +383,32 @@ GMLE.onMessage(function (msg, sender) {
   }
   if (type === GMLE.MSG.DEBUG_CLEAR) { GMLE.debug.clearAll(); return; }
 });
+
+// Merge detail-page findings (phone/website) into stored leads. Leads were
+// already counted; only fill blanks. A newly found website re-queues email
+// enrichment for that lead.
+function handleLeadEnriched(payload) {
+  var job = GMLE.jobManager.get(payload.jobId);
+  if (!job || !payload.updates) return;
+  var lead = job.leads.filter(function (l) { return l.fingerprint === payload.fp; })[0];
+  if (!lead) return;
+  var touched = false;
+  if (payload.updates.phone && !lead.phone) { lead.phone = payload.updates.phone; touched = true; }
+  if (payload.updates.website && !lead.website) {
+    lead.website = payload.updates.website;
+    touched = true;
+    if (job.fields.some(function (f) { return f.key === 'email'; })) {
+      job.enrichment.queued++;
+      GMLE.Enrichment.enqueue(lead, function (l, email) {
+        l.email = email;
+        job.enrichment.done++;
+        if (email) job.enrichment.emails++;
+        GMLE.storage.putLeads([l]).catch(function () {});
+      });
+    }
+  }
+  if (touched) GMLE.storage.putLeads([lead]).catch(function () {});
+}
 
 function stopJob(jobId) {
   var job = GMLE.jobManager.get(jobId);
