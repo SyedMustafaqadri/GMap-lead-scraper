@@ -324,6 +324,12 @@
       // SW-side sleep finished (hidden-tab scheduling) — release the waiter.
       var waiter = tickWaiters[payload.tickId];
       if (waiter) { delete tickWaiters[payload.tickId]; waiter(); }
+    } else if (type === GMLE.MSG.CHECK_JOB) {
+      // Liveness check from the SW: only confirm when this tab is genuinely
+      // extracting that exact job — otherwise the SW abandons it as stale.
+      if (running && payload.jobId === jobId) {
+        GMLE.post(GMLE.MSG.JOB_ACK, { jobId: jobId });
+      }
     }
   });
 

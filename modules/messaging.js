@@ -25,7 +25,12 @@ GMLE.MSG = {
   // (Chrome throttles hidden-tab timers to ~1/min; SW->tab messages are
   // delivered immediately). See gmSleep() in content.js.
   SCHEDULE_TICK: 'SCHEDULE_TICK',
-  LOOP_TICK: 'LOOP_TICK'
+  LOOP_TICK: 'LOOP_TICK',
+  // Stale-job liveness check: on SW wake, the stored currentJobId may belong
+  // to a dead session (browser was closed mid-run). The SW asks the job's
+  // tab; only a content script with an actually-running loop answers.
+  CHECK_JOB: 'CHECK_JOB',
+  JOB_ACK: 'JOB_ACK'
 };
 
 // Context tag for trace/debug: 'sw' in the service worker, 'content' in

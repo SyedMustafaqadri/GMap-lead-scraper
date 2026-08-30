@@ -4,6 +4,16 @@ type: session-log
 
 # Session Log
 
+## 2026-08-29 — Fix: stale job resurrected on fresh browser (overlay "resumes" old run; Stop stuck)
+- **Root cause (user report):** closing the browser mid-run left `chrome.storage.currentJobId` set (it was only cleared on clean COMPLETED). After a full browser restart, opening the overlay fired `REQUEST_STATUS` → `ensureJobRestored()` rebuilt **yesterday's dead job as RUNNING** → overlay showed the old progress with a live Stop button. Stop then marked it STOPPING and sent STOP to the tab, but the fresh content script's `jobId` was null → its `DONE` matched nothing → job stuck in STOPPING forever.
+- **Fix — liveness-checked restore:** `ensureJobRestored(notifyTabId)` now sends `CHECK_JOB {jobId}` to the stored job's tab and waits ~1.2 s for `JOB_ACK`. The content script acks **only** when `running && payload.jobId === jobId` (a genuinely live loop — the legit mid-run SW-restart case). No ack → **stale**: job removed from memory, storage pointer cleared, `STATE_CHANGED IDLE` posted to the requesting overlay (which resets to Idle; the old checkpointed leads remain exportable via the `REQUEST_EXPORT` storage fallback). New message types `CHECK_JOB`/`JOB_ACK`; STOP and REQUEST_STATUS pass the requesting tab id for the IDLE broadcast.
+- **Verified (SW harness):** stale scenario — CHECK_JOB sent, overlay reset to IDLE, pointer cleared, no fake STATUS_UPDATE; live scenario — ack → restored (STATUS_UPDATE total=2, pointer kept). Content harness — ack only when running + matching jobId. Full `node --check` sweep passes.
+**Completed:** Stale-job abandon + live-restore liveness check.
+**Pending:** User live verification (restart browser → open overlay → expect Idle, not old progress).
+**Blocker:** None.
+**Next:** Push to GitHub once the user confirms.
+**Note:** NOT pushed to GitHub — user asked to hold until they say.
+
 ## 2026-08-29 — Background extraction (hidden-tab heartbeat) + dev copy buttons + speed tuning
 - **Hidden-tab extraction (user request, "option 3"):** Chrome throttles hidden-tab timers to ~1/min, stalling the loop when the user switches windows. New `gmSleep(ms)` in `content/content.js`: when `document.hidden` is false → plain `setTimeout`; when hidden → **SW round-trip** (`SCHEDULE_TICK {delayMs, tickId}` → SW `setTimeout` → `LOOP_TICK {tickId}` → waiter released). Messages into hidden tabs are delivered instantly (never throttled) and the round trips keep the SW alive; `runtime.sendMessage` also wakes a suspended SW. All loop timers converted (feed-change polls, cycle delay, captcha poll, feed-lost wait, cooldown, detail-queue drain, finish gate). `scrollFeedStep` uses instant scroll while hidden (smooth scroll depends on rAF, frozen when hidden). `SCHEDULE_TICK`/`LOOP_TICK` excluded from the debug trace tap. Verified: hidden harness with simulated timer throttling → 70 SW round-trips, 21 lead batches, no local timers used; visible path regression → 0 SCHEDULE_TICKs.
 - **Dev drawer copy buttons (user request):** State tab got **Copy** (full snapshot JSON), Events tab got **Copy** (visible/filter-respecting trace lines incl. payload JSON, newest first) with clipboard-API + textarea fallback and "Copied ✓" flash. Log tab already had one.

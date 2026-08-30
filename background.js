@@ -23,27 +23,52 @@ var mapsStatusByTab = {};
 // this, stopJob() silently no-ops and leads hit "unknown job" after a
 // restart.
 var restorePromise = null;
-function ensureJobRestored() {
+var liveJobAcks = {}; // jobId -> callback, set while a CHECK_JOB is pending
+
+// A restored job is only kept if its tab confirms an actually-running
+// extraction loop (CHECK_JOB/JOB_ACK). Otherwise it's a stale job from a
+// previous browser session: abandon it (clear pointer, tell the overlay
+// Idle). Its checkpointed leads stay exportable via the storage fallback.
+function ensureJobRestored(notifyTabId) {
   if (restorePromise) return restorePromise;
   restorePromise = GMLE.storage.getCurrentJobId().then(function (id) {
     if (!id || GMLE.jobManager.get(id)) return;
     return GMLE.storage.getJob(id).then(function (pj) {
       if (!pj) return;
-      return GMLE.storage.getLeads(id).then(function (leads) {
-        var job = GMLE.jobManager.create({
-          jobId: id,
-          tabId: pj.tabId,
-          searchQuery: pj.searchQuery,
-          targetLeads: pj.targetLeads,
-          fields: GMLE.FIELDS
-        });
-        job.status = pj.status || GMLE.States.RUNNING;
-        job.startedAt = pj.startedAt || Date.now();
-        job.leads = leads;
-        job.savedCount = leads.length;
-        job.seen = new Set(leads.map(function (l) { return l.fingerprint; }));
-        currentJobId = id;
-        GMLE.debug.log('info', 'sw', 'restored job=' + id + ' leads=' + leads.length + ' (SW restart)');
+      return new Promise(function (resolve) {
+        var acked = false;
+        liveJobAcks[id] = function () { acked = true; };
+        if (pj.tabId != null) GMLE.postToTab(pj.tabId, GMLE.MSG.CHECK_JOB, { jobId: id });
+        setTimeout(function () {
+          delete liveJobAcks[id];
+          if (!acked) {
+            GMLE.jobManager.remove(id);
+            GMLE.storage.setCurrentJobId(null);
+            currentJobId = null;
+            GMLE.debug.log('info', 'sw', 'abandoned stale job=' + id + ' (no live loop in tab)');
+            if (notifyTabId != null) {
+              GMLE.postToTab(notifyTabId, GMLE.MSG.STATE_CHANGED, { jobId: id, state: GMLE.States.IDLE, searchQuery: pj.searchQuery });
+            }
+            return resolve();
+          }
+          GMLE.storage.getLeads(id).then(function (leads) {
+            var job = GMLE.jobManager.create({
+              jobId: id,
+              tabId: pj.tabId,
+              searchQuery: pj.searchQuery,
+              targetLeads: pj.targetLeads,
+              fields: GMLE.FIELDS
+            });
+            job.status = pj.status || GMLE.States.RUNNING;
+            job.startedAt = pj.startedAt || Date.now();
+            job.leads = leads;
+            job.savedCount = leads.length;
+            job.seen = new Set(leads.map(function (l) { return l.fingerprint; }));
+            currentJobId = id;
+            GMLE.debug.log('info', 'sw', 'restored live job=' + id + ' leads=' + leads.length + ' (SW restart)');
+            resolve();
+          });
+        }, 1200);
       });
     });
   }).catch(function (e) {
@@ -312,8 +337,16 @@ GMLE.onMessage(function (msg, sender) {
     if (sender.tab) GMLE.postToTab(sender.tab.id, GMLE.MSG.MAPS_STATUS, payload);
     return;
   }
+  if (type === GMLE.MSG.JOB_ACK) {
+    var ackCb = liveJobAcks[payload.jobId];
+    if (ackCb) ackCb();
+    return;
+  }
   if (type === GMLE.MSG.START_EXTRACTION) { startExtraction(payload, sender); return; }
-  if (type === GMLE.MSG.STOP) { ensureJobRestored().then(function () { stopJob(payload.jobId); }); return; }
+  if (type === GMLE.MSG.STOP) {
+    ensureJobRestored(sender && sender.tab ? sender.tab.id : null).then(function () { stopJob(payload.jobId); });
+    return;
+  }
   if (type === GMLE.MSG.LEADS_DISCOVERED) {
     ensureJobRestored().then(function () { handleLeads(payload.jobId, payload.leads); });
     return;
@@ -350,7 +383,7 @@ GMLE.onMessage(function (msg, sender) {
   }
   // The overlay asks for a status snapshot on open (state rehydration).
   if (type === GMLE.MSG.REQUEST_STATUS) {
-    ensureJobRestored().then(function () {
+    ensureJobRestored(sender && sender.tab ? sender.tab.id : null).then(function () {
       var tabId = (sender && sender.tab) ? sender.tab.id : null;
       if (currentJobId) {
         var jobR = GMLE.jobManager.get(currentJobId);
