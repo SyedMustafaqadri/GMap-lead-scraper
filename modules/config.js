@@ -9,34 +9,46 @@ GMLE.config = {
     maxPages: 3
   },
   scroll: {
-    // Humanized pacing — sized from HAR analysis of a healthy manual session
-    // (pagination every ~6-10s, single-flight). v2 tuning: the scroll still
-    // reaches the actual bottom (that IS the pagination trigger) but steps in
-    // smoothly and only scrolls again once the next page has landed.
-    minDelayMs: 1000,
-    maxDelayMs: 2500,
-    readPauseEveryMin: 10,
-    readPauseEveryMax: 16,
-    readPauseMinMs: 2000,
-    readPauseMaxMs: 4000,
+    // Humanized pacing — sized from HAR analysis of a healthy manual session.
+    // 2026-08-30 v3 (slower): the fast pace loaded ~10 pages then Google's
+    // feed loader hung on its spinner while the loop counted dead cycles and
+    // ended the job early. Now: slower cycles, smaller steps, and when the
+    // feed is at the bottom or shows a loading spinner the wait budget is
+    // much longer (a page is in flight, not missing).
+    minDelayMs: 2500,
+    maxDelayMs: 5000,
+    readPauseEveryMin: 6,
+    readPauseEveryMax: 10,
+    readPauseMinMs: 4000,
+    readPauseMaxMs: 8000,
     changeWaitPollMs: 250,
     changeWaitMinMs: 4000,
     changeWaitMaxMs: 6000,
+    // At the bottom / spinner visible: wait much longer for the next page.
+    bottomWaitMinMs: 10000,
+    bottomWaitMaxMs: 20000,
+    // A continuously visible spinner is "page in flight": dead cycles are
+    // not counted until it has hung for this long total.
+    loadingGiveUpMs: 90000,
+    // Before giving up on 'no-results', give the feed one last window to
+    // settle (spinner clears / end-of-list appears / more results arrive).
+    endConfirmTimeoutMs: 60000,
     stallCooldownAfter: 3,
-    stallCooldownMs: 15000,
+    stallCooldownMs: 30000,
     maxConsecutiveNoNew: 8,
-    stepMin: 0.8,
-    stepMax: 1.5,
+    stepMin: 0.6,
+    stepMax: 0.9,
     idleTimeoutMs: 300000
   },
   captchaPollMs: 2000,
   // Phase 2 (detail-panel visiting): after the feed is exhausted, each lead
   // missing phone/website gets a card click → panel scrape → close cycle.
   visit: {
-    panelTimeoutMs: 8000,      // wait for the detail panel to open
-    feedReturnTimeoutMs: 15000, // wait for [role="feed"] back after close
-    delayMinMs: 1000,          // random 1-2s between visits (human-like)
-    delayMaxMs: 2000
+    panelTimeoutMs: 8000,       // wait for the detail panel to open
+    feedReturnTimeoutMs: 20000, // wait for the feed back (healthy) after close
+    feedReadyTimeoutMs: 15000,  // extra wait before starting visits on a busy feed
+    delayMinMs: 2000,           // random 2-4s between visits (human-like)
+    delayMaxMs: 4000
   },
   debug: {
     eventBufferSize: 300,

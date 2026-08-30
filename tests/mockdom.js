@@ -50,10 +50,12 @@ MockElement.prototype._walk = function (fn) {
 };
 
 MockElement.prototype.querySelectorAll = function (sel) {
-  var parsed = parseSelector(sel);
   var out = [];
   var self = this;
-  this._walk(function (e) { if (e !== self && matches(e, parsed)) out.push(e); });
+  String(sel).split(',').forEach(function (part) {
+    var parsed = parseSelector(part);
+    self._walk(function (e) { if (e !== self && matches(e, parsed)) out.push(e); });
+  });
   return out;
 };
 

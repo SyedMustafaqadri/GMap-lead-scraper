@@ -50,6 +50,10 @@ function shrinkTimers(GMLE, panelTimeoutMs) {
   s.changeWaitPollMs = 5;
   s.changeWaitMinMs = 10;
   s.changeWaitMaxMs = 10;
+  s.bottomWaitMinMs = 10;
+  s.bottomWaitMaxMs = 10;
+  s.loadingGiveUpMs = 30;
+  s.endConfirmTimeoutMs = 100;
   s.minDelayMs = 5;
   s.maxDelayMs = 5;
   s.readPauseMinMs = 5;
@@ -58,6 +62,7 @@ function shrinkTimers(GMLE, panelTimeoutMs) {
   var v = GMLE.config.visit;
   v.panelTimeoutMs = panelTimeoutMs || 300;
   v.feedReturnTimeoutMs = 50;
+  v.feedReadyTimeoutMs = 50;
   v.delayMinMs = 5;
   v.delayMaxMs = 10;
   GMLE.config.captchaPollMs = 5;

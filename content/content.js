@@ -20,6 +20,11 @@
   var visitQueue = [];
   var visitTotal = 0;
   var endReason = null;
+  // Spinner patience: while the feed shows a loading indicator we are NOT in
+  // a dead cycle — the next page is in flight (2026-08-30 run: Google's
+  // loader hung on its spinner and the loop ended the job prematurely).
+  var loadingMs = 0;
+  var loadingDiag = false;
 
   function randBetween(min, max) {
     return min + Math.random() * (max - min);
@@ -66,6 +71,8 @@
       href: location.href.slice(0, 120),
       feedH: fed ? fed.scrollHeight : 0,
       feedTop: fed ? Math.round(fed.scrollTop) : 0,
+      spinner: feedSpinner(),
+      bottom: atBottom(),
       streak: noAnchorStreak,
       lastWaitMs: lastWaitMs,
       cooldownUsed: cooldownUsed
@@ -77,6 +84,25 @@
   }
   function detectEnd() {
     return /you'?ve reached the end of|end of .*list|no (more|further) results/i.test(document.body.innerText);
+  }
+  // Loading indicator inside the feed (stable hooks only: progressbar role,
+  // aria-busy, or "Loading" text at the feed tail where the spinner lives).
+  function feedSpinner() {
+    var fed = document.querySelector(GMLE.selectors.feed);
+    if (!fed) return false;
+    if (fed.querySelector('[role="progressbar"], [aria-busy="true"]')) return true;
+    return /loading/i.test((fed.innerText || '').slice(-600));
+  }
+  // Near/at the bottom — the pagination trigger zone where the next page
+  // loads (or the spinner hangs). Waits must be longer there.
+  function atBottom() {
+    var fed = document.querySelector(GMLE.selectors.feed);
+    if (!fed) return false;
+    var view = fed.clientHeight || 600;
+    return fed.scrollHeight - fed.scrollTop - view <= view * 0.5;
+  }
+  function isFeedHealthy() {
+    return !feedSpinner() && countAnchors() > 0;
   }
   function sendStatus() {
     var ready = !!getFeed() && isMaps();
@@ -184,16 +210,72 @@
 
   // Feed exhausted → run phase 2 (if any leads need it), then DONE. The DONE
   // must wait until the visit queue drains so the export has the panel data.
+  // The feed must be healthy before the first click: clicking into a stalled
+  // feed and closing the panel destroyed the search session on the
+  // 2026-08-30 run (empty feed, URL dropped to /maps/@lat,lng, all remaining
+  // visits lost).
   function endOfFeed(reason) {
     if (!running) return;
     endReason = reason || 'end';
-    buildVisitQueue();
-    if (visitQueue.length) {
-      GMLE.post(GMLE.MSG.DIAG, Object.assign({ reason: 'phase2-start', visits: visitQueue.length }, diag()));
-      visitNext();
-    } else {
+    if (endReason === 'end') { tryPhase2(); return; }
+    // 'no-results' — the feed may just be slow (spinner still up, next page
+    // in flight). Give it one last window to settle: if the end-of-list
+    // marker appears we continue to phase 2; if more results arrive we
+    // resume scrolling; otherwise give up for real.
+    waitFeedSettle(cfg.scroll.endConfirmTimeoutMs).then(function (res) {
+      if (!running) return;
+      if (res === 'recovered') {
+        noAnchorStreak = 0;
+        loadingMs = 0;
+        GMLE.post(GMLE.MSG.DIAG, Object.assign({ reason: 'feed-recovered-resume' }, diag()));
+        loop();
+        return;
+      }
+      if (res === 'end') { endReason = 'end'; tryPhase2(); return; }
+      GMLE.post(GMLE.MSG.DIAG, Object.assign({ reason: 'phase2-skipped-feed-unhealthy' }, diag()));
       finishNow();
+    });
+  }
+
+  // Wait for the feed to settle after a stall. Resolves:
+  //   'end'       — end-of-list marker visible and no spinner (feed is done)
+  //   'recovered' — more anchors arrived (feed was slow, not finished)
+  //   'giveup'    — neither happened within timeoutMs
+  function waitFeedSettle(timeoutMs) {
+    var baseline = countAnchors();
+    var start = Date.now();
+    return new Promise(function (resolve) {
+      function poll() {
+        if (!running) { resolve('giveup'); return; }
+        if (detectEnd() && !feedSpinner()) { resolve('end'); return; }
+        if (countAnchors() > baseline) { resolve('recovered'); return; }
+        if (Date.now() - start >= timeoutMs) { resolve('giveup'); return; }
+        gmSleep(500).then(poll);
+      }
+      gmSleep(500).then(poll);
+    });
+  }
+
+  function tryPhase2() {
+    if (!running) return;
+    buildVisitQueue();
+    if (!visitQueue.length) { finishNow(); return; }
+    if (!isFeedHealthy()) {
+      // Busy feed — one short wait for it to become clickable, then skip.
+      waitFeedSettle(cfg.visit.feedReadyTimeoutMs).then(function (res) {
+        if (!running) return;
+        if (res === 'end' && isFeedHealthy()) { beginVisits(); return; }
+        GMLE.post(GMLE.MSG.DIAG, Object.assign({ reason: 'phase2-skipped-feed-unhealthy' }, diag()));
+        finishNow();
+      });
+      return;
     }
+    beginVisits();
+  }
+
+  function beginVisits() {
+    GMLE.post(GMLE.MSG.DIAG, Object.assign({ reason: 'phase2-start', visits: visitQueue.length }, diag()));
+    visitNext();
   }
 
   function finishNow() {
@@ -273,11 +355,15 @@
     });
   }
 
-  function waitForFeed(timeoutMs) {
+  // Wait for the feed back after a panel close — and healthy: present, with
+  // cards, and not showing the loading spinner. On the 2026-08-30 run an
+  // empty re-rendering feed passed the old "feed exists" check while the
+  // search context was gone, so every remaining visit failed.
+  function waitFeedBack(timeoutMs) {
     var start = Date.now();
     return new Promise(function (resolve) {
       function poll() {
-        if (document.querySelector(GMLE.selectors.feed)) { resolve(true); return; }
+        if (isFeedHealthy()) { resolve(true); return; }
         if (Date.now() - start >= timeoutMs) { resolve(false); return; }
         gmSleep(250).then(poll);
       }
@@ -337,10 +423,19 @@
     visitQueue.shift();
     var closeBtn = document.querySelector('button[aria-label="Close"]');
     if (closeBtn) closeBtn.click();
-    // Wait for the feed to return (panel close restores it) before the next
-    // visit — same feed-lost waiting the scroll loop relies on.
-    waitForFeed(cfg.visit.feedReturnTimeoutMs).then(function () {
+    // Wait for the feed to return healthy before the next visit — same
+    // feed-lost waiting the scroll loop relies on. If it never does, the
+    // search context is gone: stop visiting instead of failing one by one.
+    waitFeedBack(cfg.visit.feedReturnTimeoutMs).then(function (back) {
       if (!running) return;
+      if (!back) {
+        GMLE.post(GMLE.MSG.DIAG, Object.assign({
+          reason: 'phase2-feed-not-restored', remaining: visitQueue.length
+        }, diag()));
+        visitQueue = [];
+        finishNow();
+        return;
+      }
       GMLE.post(GMLE.MSG.DIAG, Object.assign({
         reason: 'phase2-visit',
         name: lead.name,
@@ -390,16 +485,19 @@
 
     // Single-flight wait: hold until the next page actually lands (or the
     // budget expires). A "dead" cycle = no new leads AND no feed growth.
-    var budget = randBetween(cfg.scroll.changeWaitMinMs, cfg.scroll.changeWaitMaxMs);
+    // At the bottom / with a spinner up, the next page is in flight — use a
+    // much longer budget instead of concluding the feed is dead.
+    var patient = feedSpinner() || atBottom();
+    var budget = patient
+      ? randBetween(cfg.scroll.bottomWaitMinMs, cfg.scroll.bottomWaitMaxMs)
+      : randBetween(cfg.scroll.changeWaitMinMs, cfg.scroll.changeWaitMaxMs);
     waitForFeedChange(prev, budget).then(function (res) {
       if (!running) return;
       lastWaitMs = res.waitedMs;
-      if (res.changed || leads.length) noAnchorStreak = 0;
-      else noAnchorStreak++;
-      waitDone();
+      waitDone(res);
     });
 
-    function waitDone() {
+    function waitDone(res) {
       loopCount++;
       if (loopCount % 3 === 0) GMLE.post(GMLE.MSG.DIAG, diag());
 
@@ -410,6 +508,27 @@
         GMLE.post(GMLE.MSG.DIAG, Object.assign({ reason: 'feed-lost-waiting' }, diag()));
         gmSleep(2000).then(loop);
         return;
+      }
+
+      // Spinner visible = page in flight, not a dead feed. Don't count dead
+      // cycles while it's up (unless it hangs for loadingGiveUpMs total),
+      // and don't end the job while it's loading (2026-08-30 run).
+      var spin = feedSpinner();
+      if (res.changed || leads.length) {
+        noAnchorStreak = 0;
+        loadingMs = 0;
+        loadingDiag = false;
+      } else if (spin) {
+        loadingMs += res.waitedMs;
+        if (!loadingDiag) {
+          loadingDiag = true;
+          GMLE.post(GMLE.MSG.DIAG, Object.assign({ reason: 'feed-loading-wait', loadingMs: Math.round(loadingMs) }, diag()));
+        }
+        if (loadingMs >= cfg.scroll.loadingGiveUpMs) { noAnchorStreak++; loadingMs = 0; }
+      } else {
+        noAnchorStreak++;
+        loadingMs = 0;
+        loadingDiag = false;
       }
 
       if (detectEnd()) {
@@ -424,7 +543,9 @@
 
       var proceed = function () {
         if (!running) return;
-        if (document.querySelector(GMLE.selectors.feed)) scrollFeedStep();
+        // Don't scroll while the feed is loading a page — the next page
+        // lands at the bottom we're already at.
+        if (!feedSpinner() && document.querySelector(GMLE.selectors.feed)) scrollFeedStep();
         var delay = randBetween(cfg.scroll.minDelayMs, cfg.scroll.maxDelayMs);
         cyclesUntilPause--;
         if (cyclesUntilPause <= 0) {
@@ -459,6 +580,8 @@
       visitQueue = [];
       visitTotal = 0;
       endReason = null;
+      loadingMs = 0;
+      loadingDiag = false;
       noAnchorStreak = 0;
       loopCount = 0;
       cooldownUsed = false;

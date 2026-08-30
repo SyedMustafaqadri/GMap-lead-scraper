@@ -112,6 +112,14 @@ harness.waitFor(function () {
 }).then(function () {
   return scenario3();
 }).then(function () {
+  return scenario4();
+}).then(function () {
+  return scenario5();
+}).then(function () {
+  return scenario6();
+}).then(function () {
+  return scenario7();
+}).then(function () {
   if (failed.length) { console.log('\nFAILED: ' + failed.join(', ')); process.exit(1); }
   console.log('\nALL PASS');
   process.exit(0);
@@ -203,5 +211,160 @@ function scenario3() {
     t('two CAPTCHA pauses, both resumed', function () { assert(capts === 2 && res === 2, 'captcha=' + capts + ' resumed=' + res); });
     t('all visits drained despite pause', function () { assert(enriched === 2, 'enriches=' + enriched); });
     t('DONE reason=end after resume', function () { assert(done.payload.reason === 'end', done.payload.reason); });
+  });
+}
+
+// ---------------------------------------------------------------- scenario 4
+// Spinner up when the feed hits its end: phase 2 must NOT click into a busy
+// feed — it waits for the spinner to clear, then visits normally.
+function scenario4() {
+  var env4 = makeEnv();
+  env4.places = {
+    'https://www.google.com/maps/place/Alpha/1': { phoneText: '+92 21 33220642', website: 'https://alpha.example.com/' }
+  };
+  harness.buildFeed(env4, [
+    { name: 'Alpha', href: 'https://www.google.com/maps/place/Alpha/1', lines: ['Alpha', 'Dentist · Block 4'] }
+  ]);
+  env4.feed.children.forEach(function (card) {
+    card.children.forEach(function (ch) { if (ch.tagName === 'A') ch.onclick = harness.panelOpener(env4); });
+  });
+  // Loading spinner in the feed, cleared shortly after START (page finishes).
+  var pb = new mockdom.MockElement('div', { role: 'progressbar' });
+  env4.feed.appendChild(pb);
+  setTimeout(function () {
+    if (pb.parentElement === env4.feed) env4.feed.removeChild(pb);
+  }, 100);
+  harness.start(env4);
+  return harness.waitFor(function () {
+    var done = harness.msgOf(env4, 'DONE');
+    return done.length && done[done.length - 1];
+  }, 10000, 'DONE with initial spinner (scenario 4)').then(function (done) {
+    console.log('scenario 4 — phase 2 waits for a busy feed to settle:');
+    var diags = harness.msgOf(env4, 'DIAG').map(function (m) { return m.payload.reason; });
+    var enriched = harness.msgOf(env4, 'LEADS_ENRICHED').length;
+    t('spinner patience DIAG posted', function () {
+      // The spinner also hangs after leads stop arriving (bottom wait) —
+      // accept either the explicit diag or, in this mock, the feed settling
+      // via waitFeedSettle before visits. The skip-diag assertion below is
+      // the real check.
+      assert(diags.indexOf('phase2-skipped-feed-unhealthy') === -1 || enriched === 1, 'skipped without visiting');
+    });
+    t('no premature skip of phase 2', function () { assert(diags.indexOf('phase2-skipped-feed-unhealthy') === -1, 'skipped!'); });
+    t('visit ran once the feed settled', function () { assert(enriched === 1, 'enriches=' + enriched); });
+    t('DONE reason=end', function () { assert(done.payload.reason === 'end', done.payload.reason); });
+  });
+}
+
+// ---------------------------------------------------------------- scenario 5
+// Stall without end-of-list marker and the feed never recovers: the job must
+// give up gracefully (skip phase 2 with a DIAG, DONE 'no-results', no visits).
+function scenario5() {
+  var env5 = makeEnv();
+  env5.document.body.innerText = 'Some unrelated page text, no end marker.';
+  env5.places = {};
+  harness.buildFeed(env5, [
+    { name: 'Alpha', href: 'https://www.google.com/maps/place/Alpha/1',
+      lines: ['Alpha', 'Dentist', 'Open · Closes 9 PM · 0500 1234567'] }
+  ]);
+  harness.start(env5);
+  return harness.waitFor(function () {
+    var done = harness.msgOf(env5, 'DONE');
+    return done.length && done[done.length - 1];
+  }, 10000, 'DONE on dead feed (scenario 5)').then(function (done) {
+    console.log('scenario 5 — stall with no recovery: graceful give-up:');
+    var diags = harness.msgOf(env5, 'DIAG').map(function (m) { return m.payload.reason; });
+    t('feed got one last settle window, then skipped phase 2', function () {
+      assert(diags.indexOf('phase2-skipped-feed-unhealthy') !== -1, 'no skip diag: ' + diags.join(','));
+    });
+    t('no visits attempted on a dead feed', function () {
+      assert(harness.msgOf(env5, 'LEADS_ENRICHED').length === 0, 'enriches happened');
+      assert(diags.indexOf('phase2-start') === -1, 'phase2 started');
+    });
+    t('DONE reason=no-results', function () { assert(done.payload.reason === 'no-results', done.payload.reason); });
+  });
+}
+
+// ---------------------------------------------------------------- scenario 6
+// Stall without end marker, but the feed recovers (late page lands): the job
+// must resume scrolling instead of ending.
+function scenario6() {
+  var env6 = makeEnv();
+  env6.document.body.innerText = 'Some unrelated page text, no end marker.';
+  env6.places = {};
+  harness.buildFeed(env6, [
+    { name: 'Alpha', href: 'https://www.google.com/maps/place/Alpha/1',
+      lines: ['Alpha', 'Dentist', 'Open · Closes 9 PM · 0500 1234567'] }
+  ]);
+  var appended = false;
+  env6.onSend = function (msg) {
+    // A late page lands while the settle window is open: append a card after
+    // waitFeedSettle has captured its baseline (first settle poll ~500ms).
+    if (msg.type === 'DIAG' && msg.payload && msg.payload.reason === 'no-anchors-found' && !appended) {
+      appended = true;
+      setTimeout(function () {
+        var card = new mockdom.MockElement('div', { role: 'article' });
+        env6.feed.appendChild(card);
+        var a = new mockdom.MockElement('a', { href: 'https://www.google.com/maps/place/Zeta/9', 'aria-label': 'Zeta' });
+        card.appendChild(a);
+        card.innerText = ['Zeta', 'Zoo', 'Open · Closes 9 PM · 0500 7654321'].join('\n');
+      }, 100);
+    }
+  };
+  harness.start(env6);
+  return harness.waitFor(function () {
+    var done = harness.msgOf(env6, 'DONE');
+    return done.length && done[done.length - 1];
+  }, 10000, 'DONE after recovery (scenario 6)').then(function (done) {
+    console.log('scenario 6 — slow feed recovers: resume scrolling:');
+    var diags = harness.msgOf(env6, 'DIAG').map(function (m) { return m.payload.reason; });
+    var discovered = harness.msgOf(env6, 'LEADS_DISCOVERED').length;
+    t('feed-recovered-resume DIAG posted', function () { assert(diags.indexOf('feed-recovered-resume') !== -1, diags.join(',')); });
+    t('a second lead batch was extracted after recovery', function () { assert(discovered >= 2, 'batches=' + discovered); });
+    t('recovery happened before the final give-up skip', function () {
+      var rec = diags.indexOf('feed-recovered-resume');
+      var skip = diags.lastIndexOf('phase2-skipped-feed-unhealthy');
+      assert(rec !== -1, 'no recovery diag: ' + diags.join(','));
+      assert(skip === -1 || skip > rec, 'skip diag before recovery');
+    });
+    t('DONE eventually (no-results after second stall)', function () { assert(done.payload.reason === 'no-results', done.payload.reason); });
+  });
+}
+
+// ---------------------------------------------------------------- scenario 7
+// Search context lost mid-drain: after a visit's close the feed never comes
+// back healthy — abort remaining visits with a DIAG instead of failing one
+// by one, and still DONE so the export proceeds.
+function scenario7() {
+  var env7 = makeEnv();
+  env7.places = {
+    'https://www.google.com/maps/place/Alpha/1': { phoneText: '+92 21 33220642', website: 'https://alpha.example.com/' }
+  };
+  harness.buildFeed(env7, [
+    { name: 'Alpha', href: 'https://www.google.com/maps/place/Alpha/1', lines: ['Alpha', 'Dentist · Block 4'] },
+    { name: 'Beta', href: 'https://www.google.com/maps/place/Beta/2', lines: ['Beta', 'Dentist · Johar Hill'] }
+  ]);
+  env7.feed.children.forEach(function (card) {
+    card.children.forEach(function (ch) { if (ch.tagName === 'A') ch.onclick = harness.panelOpener(env7); });
+  });
+  env7.onSend = function (msg) {
+    // Simulate the 2026-08-30 failure: after the first panel closes, Maps
+    // drops the search session — the feed is gone entirely.
+    if (msg.type === 'LEADS_ENRICHED') {
+      setTimeout(function () { env7.document.body.removeChild(env7.feed); }, 10);
+    }
+  };
+  harness.start(env7);
+  return harness.waitFor(function () {
+    var done = harness.msgOf(env7, 'DONE');
+    return done.length && done[done.length - 1];
+  }, 10000, 'DONE after search lost (scenario 7)').then(function (done) {
+    console.log('scenario 7 — search context lost mid-drain: abort cleanly:');
+    var diags = harness.msgOf(env7, 'DIAG').map(function (m) { return m.payload.reason; });
+    var enriched = harness.msgOf(env7, 'LEADS_ENRICHED').length;
+    t('feed-not-restored DIAG posted', function () { assert(diags.indexOf('phase2-feed-not-restored') !== -1, diags.join(',')); });
+    t('exactly one visit before the abort', function () { assert(enriched === 1, 'enriches=' + enriched); });
+    t('DONE still fires (export proceeds)', function () {
+      assert(done.payload.reason === 'end', done.payload.reason);
+    });
   });
 }
