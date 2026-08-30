@@ -3,6 +3,9 @@ self.GMLE = self.GMLE || {};
 GMLE.extractors = {
   fromAnchor: function (a) {
     var card = GMLE.selectors.cardOf(a);
+    // Sponsored cards are ads: their "website" link is an /aclk? redirect and
+    // their data is not the business's. Skip the whole card (D-004 hooks).
+    if (card && card.querySelector('h1[aria-label="Sponsored"]')) return null;
     var lines = this._lines(card);
     var name = lines.length ? lines[0] : null;
     var ratingObj = this._rating(card);
@@ -15,43 +18,39 @@ GMLE.extractors = {
     var phone = telEl
       ? (telEl.getAttribute('href') || '').replace(/^tel:/i, '').replace(/[^\d+]/g, '') || null
       : null;
-    if (!phone) phone = this._phoneFromText(text);
 
-    var candidates = lines.slice(1).filter(function (l) {
-      if (l === name) return false;
-      if (l === ratingObj._line) return false;
-      if (this._isRatingLine(l)) return false;   // "4.6", "(23)", "4.6(23)" — incl. comma counts
-      if (/^[\d.,()\s]+$/.test(l)) return false;
-      if (/^(rs|pkr|usd|\$|€|£)\s?[\d,]/i.test(l.trim())) return false; // price ranges ("Rs 1–6,000")
-      if (/(no reviews|family-friendly|dine-?in|take-?away|takeaway|curbside pickup|drive-?through|outdoor seating|no-contact delivery)/i.test(l)) return false;
-      if (/["“”]/.test(l)) return false;         // quoted review snippets
-      return true;
-    }, this);
-
-    var statusLine = null;
-    for (var i = 0; i < candidates.length; i++) {
-      if (/\b(open|closed|opens|open 24)\b/i.test(candidates[i])) { statusLine = candidates[i]; break; }
-    }
-    if (statusLine) {
-      var sp = this._phoneFromText(statusLine);
-      if (sp) phone = phone || sp;
-      candidates = candidates.filter(function (l) { return l !== statusLine; });
-    }
-
-    var category = null, address = null;
-    candidates.forEach(function (l) {
-      var parts = l.split('·').map(function (p) {
+    // Classify per PART (each info line is "part · part · part"), not per
+    // line: the restaurant layout joins rating+price on one line
+    // ("4.7(4,699) · Rs 1,000–7,000") and drops the phone line entirely, so
+    // line-level filters leaked "4.7(4,699)" into Category and "Rs 1,000–7,000"
+    // into Address (2026-08-30 live run).
+    var category = null, address = null, statusPhone = null;
+    for (var i = 1; i < lines.length; i++) {
+      var parts = lines[i].split('·').map(function (p) {
         return p.replace(/[★☆\uE000-\uF8FF]/g, '').trim();
       }).filter(function (p) { return p; });
-      if (parts.length >= 2) {
-        if (!category) category = parts[0];
-        if (!address) address = parts[parts.length - 1];
-      } else if (parts.length === 1) {
-        var s = parts[0];
-        if (GMLE.extractors._looksLikeAddress(s)) { if (!address) address = s; }
-        else { if (!category) category = s; }
+      var hasStatus = parts.some(function (p) { return GMLE.extractors._isStatusPart(p); });
+      for (var j = 0; j < parts.length; j++) {
+        var p = parts[j];
+        if (p === name) continue;
+        if (this._isNoisePart(p)) {
+          if (hasStatus && !statusPhone) {
+            // Clinic layout: the status line is "Closed · Opens 10 AM · <phone>"
+            // — the phone is the non-status remainder of that line.
+            statusPhone = this._phoneFromText(p) || statusPhone;
+          }
+          continue;
+        }
+        if (hasStatus && !statusPhone) {
+          var ph = this._phoneFromText(p);
+          if (ph) { statusPhone = ph; continue; }
+        }
+        if (this._looksLikeAddress(p)) { if (!address) address = p; }
+        else if (!category) category = p;
       }
-    });
+    }
+    if (!phone) phone = statusPhone;
+    if (!phone) phone = this._phoneFromText(text);
 
     return {
       name: name,
@@ -74,23 +73,48 @@ GMLE.extractors = {
       .filter(function (s) { return s; });
   },
 
+  // Structured, stable hook: span[role="img"][aria-label="4.7 stars 243 Reviews"].
+  // Falls back to the text form "4.7(243)" for older layouts.
   _rating: function (card) {
     if (!card) return { rating: null, reviews: null, _line: null };
-    var el = card.querySelector('[aria-label*="stars"]');
-    var rating = el ? (el.getAttribute('aria-label').match(/([\d.]+)/) || [])[1] : null;
+    var rating = null, reviews = null;
+    var el = card.querySelector('span[role="img"][aria-label*="stars"]');
+    if (el) {
+      var al = el.getAttribute('aria-label') || '';
+      rating = (al.match(/([\d.]+)\s*stars?/i) || [])[1] || null;
+      var rm = al.match(/([\d,]+)\s*reviews?/i);
+      if (rm) reviews = rm[1].replace(/,/g, '');
+    }
     var m = (card.innerText || '').match(/([\d.]+)\s*\(([\d,]+)\)/);
     if (m) {
       if (!rating) rating = m[1];
-      return { rating: rating, reviews: m[2].replace(/,/g, ''), _line: m[0] };
+      if (!reviews) reviews = m[2].replace(/,/g, '');
+      return { rating: rating, reviews: reviews, _line: m[0] };
     }
-    return { rating: rating, reviews: null, _line: null };
+    return { rating: rating, reviews: reviews, _line: null };
   },
 
-  _isRatingLine: function (l) {
-    if (!l) return false;
-    return /^\d(\.\d+)?\(([\d,]+)\)$/.test(l) ||
-      /^\d(\.\d+)?$/.test(l) ||
-      /^\(([\d,]+)\)$/.test(l);
+  _isRatingPart: function (p) {
+    if (!p) return false;
+    return /^\d(\.\d+)?\s*\(([\d,]+)\)$/.test(p) ||   // 4.7(4,699)
+      /^\(([\d,]+)\)$/.test(p) ||                     // (4,699)
+      /^\d(\.\d+)?$/.test(p);                         // 4.7
+  },
+
+  _isStatusPart: function (p) {
+    return /\b(open|closed|opens|closes|open 24)\b/i.test(p || '');
+  },
+
+  _isNoisePart: function (p) {
+    if (!p) return true;
+    if (this._isRatingPart(p)) return true;
+    if (/^[\d.,()\s]+$/.test(p)) return true;         // pure numbers
+    if (/^(rs|pkr|usd|aed|inr|eur|\$|€|£|₹)\s?[\d,]/i.test(p)) return true; // price ranges
+    if (/["“”]/.test(p)) return true;                 // quoted review snippets
+    if (/(family-?friendly|dine-?in|take-?away|takeaway|curbside pickup|drive-?through|outdoor seating|no-contact delivery|group-?friendly|kid-?friendly|wheelchair)/i.test(p)) return true; // attribute chips
+    if (this._isStatusPart(p)) return true;           // Open / Closed / Opens… / Closes…
+    if (/^(directions|website|save|share|nearby|call)$/i.test(p)) return true; // action-button labels
+    return false;
   },
 
   _phoneFromText: function (text) {
@@ -115,35 +139,6 @@ GMLE.extractors = {
       }
     }
     return fallback;
-  },
-
-  // Detail-page parsing. The feed card does not always render the phone
-  // (layout-dependent), so the caller fetches the place page and pulls the
-  // phone / website from its HTML.
-  phoneFromHtml: function (html) {
-    if (!html) return null;
-    var m = html.match(/href="tel:([^"]+)"/i);
-    if (m && m[1]) {
-      var tel = m[1].replace(/[^\d+]/g, '');
-      if (tel.replace(/\D/g, '').length >= 7) return tel;
-    }
-    var text = html
-      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<[^>]+>/g, ' ');
-    return this._phoneFromText(text);
-  },
-
-  websiteFromHtml: function (html) {
-    if (!html) return null;
-    var re = /href="(https?:\/\/[^"]+)"/gi;
-    var m;
-    while ((m = re.exec(html))) {
-      var u = m[1].replace(/\\u003d/g, '=').replace(/&amp;/g, '&');
-      if (/google\.[a-z.]+|gstatic\.com|googleapis\.com|schema\.org/i.test(u)) continue;
-      return u.slice(0, 300);
-    }
-    return null;
   },
 
   _looksLikeAddress: function (s) {

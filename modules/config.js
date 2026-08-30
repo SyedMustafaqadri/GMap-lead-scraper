@@ -30,6 +30,14 @@ GMLE.config = {
     idleTimeoutMs: 300000
   },
   captchaPollMs: 2000,
+  // Phase 2 (detail-panel visiting): after the feed is exhausted, each lead
+  // missing phone/website gets a card click → panel scrape → close cycle.
+  visit: {
+    panelTimeoutMs: 8000,      // wait for the detail panel to open
+    feedReturnTimeoutMs: 15000, // wait for [role="feed"] back after close
+    delayMinMs: 1000,          // random 1-2s between visits (human-like)
+    delayMaxMs: 2000
+  },
   debug: {
     eventBufferSize: 300,
     logBufferSize: 300

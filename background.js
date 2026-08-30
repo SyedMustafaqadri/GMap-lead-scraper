@@ -428,12 +428,15 @@ GMLE.onMessage(function (msg, sender) {
   if (type === GMLE.MSG.DEBUG_CLEAR) { GMLE.debug.clearAll(); return; }
 });
 
-// Merge detail-page findings (phone/website) into stored leads. Leads were
-// already counted; only fill blanks. A newly found website re-queues email
-// enrichment for that lead.
+// Merge detail-panel findings (phone/website/better address) into stored
+// leads. Leads were already counted; only fill blanks. A newly found website
+// re-queues email enrichment for that lead. Touching a lead refreshes
+// lastLeadTs so the SW idle watchdog doesn't kill the job during a long
+// phase-2 visit drain (visits can outlast idleTimeoutMs with no new leads).
 function handleLeadEnriched(payload) {
   var job = GMLE.jobManager.get(payload.jobId);
   if (!job || !payload.updates) return;
+  job.lastLeadTs = Date.now();
   var lead = job.leads.filter(function (l) { return l.fingerprint === payload.fp; })[0];
   if (!lead) return;
   var touched = false;
@@ -451,6 +454,9 @@ function handleLeadEnriched(payload) {
       });
     }
   }
+  // Address is an upgrade, not a fill: the panel carries the full address
+  // while the card one is truncated, so overwrite it whenever we got one.
+  if (payload.updates.address) { lead.address = payload.updates.address; touched = true; }
   if (touched) GMLE.storage.putLeads([lead]).catch(function () {});
 }
 
