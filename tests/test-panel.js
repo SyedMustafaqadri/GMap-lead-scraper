@@ -11,6 +11,7 @@ var mockdom = require('./mockdom.js');
 
 var env = harness.load();
 harness.shrinkTimers(env.GMLE);
+harness.setSearchRoute(env);
 env.document.body.innerText = "You've reached the end of the list.";
 
 env.places = {
@@ -60,9 +61,14 @@ harness.waitFor(function () {
   assert(u2.address === 'B231 Johar Hill Rd, Lahore', 'address falls back to innerText: ' + u2.address);
   assert(!u2.website, 'no website -> no website update');
 
-  // Panel was closed after each visit (Close button clicked).
+  // Panel was closed after each visit — via Escape (search route preserved),
+  // NOT via the native Close click that resets Maps to the landing state.
   assert(!env.document.body.querySelector('div[role="main"]'), 'panel removed after close');
   assert(!env.document.body.querySelector('button[aria-label="Close"]'), 'close button removed');
+  assert(/\/maps\/search\//.test(global.location.href), 'search route preserved');
+  var visitDiags = harness.msgOf(env, 'DIAG').filter(function (m) { return m.payload.reason === 'phase2-visit'; });
+  assert(visitDiags.length === 2 && visitDiags.every(function (m) { return m.payload.closeMethod === 'escape'; }),
+    'all visits closed via escape: ' + JSON.stringify(visitDiags.map(function (m) { return m.payload.closeMethod; })));
 
   console.log('ALL PASS');
   process.exit(0);

@@ -11,6 +11,7 @@ var mockdom = require('./mockdom.js');
 function makeEnv() {
   var env = harness.load();
   harness.shrinkTimers(env.GMLE);
+  harness.setSearchRoute(env);
   env.document.body.innerText = "You've reached the end of the list.";
   env.closeButtons = [];
   return env;
@@ -103,9 +104,15 @@ harness.waitFor(function () {
     var visits = diags.filter(function (r) { return r === 'phase2-visit'; }).length;
     assert(starts === 1 && visits === 4, 'starts=' + starts + ' visits=' + visits);
   });
-  t('close clicked after each real panel (3 panels opened)', function () {
+  t('close via Escape bypassed the native Close click on every panel', function () {
     assert(env.closeButtons.length === 3, 'close buttons=' + env.closeButtons.length);
-    env.closeButtons.forEach(function (b, i) { assert(b.__clicked, 'close #' + i + ' not clicked'); });
+    env.closeButtons.forEach(function (b, i) {
+      assert(!b.__clicked, 'close #' + i + ' was clicked (should be Escape-dismissed)');
+    });
+    var visitDiags = harness.msgOf(env, 'DIAG').filter(function (m) { return m.payload.reason === 'phase2-visit'; });
+    assert(visitDiags.every(function (m) { return m.payload.closeMethod === 'escape'; }),
+      'closeMethod=' + JSON.stringify(visitDiags.map(function (m) { return m.payload.closeMethod; })));
+    assert(/\/maps\/search\//.test(global.location.href), 'search route lost');
   });
   t('PING keepalive posted while running (stops with the job)', function () {
     var pings = harness.msgOf(env, 'PING').length;
@@ -125,6 +132,8 @@ harness.waitFor(function () {
   return scenario6();
 }).then(function () {
   return scenario7();
+}).then(function () {
+  return scenario8();
 }).then(function () {
   if (failed.length) { console.log('\nFAILED: ' + failed.join(', ')); process.exit(1); }
   console.log('\nALL PASS');
@@ -367,9 +376,53 @@ function scenario7() {
     console.log('scenario 7 — search context lost mid-drain: abort cleanly:');
     var diags = harness.msgOf(env7, 'DIAG').map(function (m) { return m.payload.reason; });
     var enriched = harness.msgOf(env7, 'LEADS_ENRICHED').length;
-    t('feed-not-restored DIAG posted', function () { assert(diags.indexOf('phase2-feed-not-restored') !== -1, diags.join(',')); });
+    t('close-reset DIAG posted', function () { assert(diags.indexOf('phase2-close-reset') !== -1, diags.join(',')); });
     t('exactly one visit before the abort', function () { assert(enriched === 1, 'enriches=' + enriched); });
     t('DONE still fires (export proceeds)', function () {
+      assert(done.payload.reason === 'end', done.payload.reason);
+    });
+  });
+}
+
+// ---------------------------------------------------------------- scenario 8
+// Escape-unresponsive panel (Maps ignores synthetic keydown): the fallback
+// chain (outer span -> inner button) must still dismiss the panel, keep the
+// search route, and drain every visit — no re-search, no reset.
+function scenario8() {
+  var env8 = makeEnv();
+  env8.places = {
+    'https://www.google.com/maps/place/Alpha/1': { phoneText: '+92 21 33220642', website: 'https://alpha.example.com/', noEscape: true },
+    'https://www.google.com/maps/place/Beta/2': { phoneText: '+92 21 11111111', website: 'https://beta.example.com/', noEscape: true }
+  };
+  harness.buildFeed(env8, [
+    { name: 'Alpha', href: 'https://www.google.com/maps/place/Alpha/1', lines: ['Alpha', 'Dentist · Block 4'] },
+    { name: 'Beta', href: 'https://www.google.com/maps/place/Beta/2', lines: ['Beta', 'Dentist · Johar Hill'] }
+  ]);
+  env8.feed.children.forEach(function (card) {
+    card.children.forEach(function (ch) { if (ch.tagName === 'A') ch.onclick = harness.panelOpener(env8, env8.closeButtons); });
+  });
+  harness.start(env8);
+  return harness.waitFor(function () {
+    var done = harness.msgOf(env8, 'DONE');
+    return done.length && done[done.length - 1];
+  }, 10000, 'DONE with Escape-unresponsive panels (scenario 8)').then(function (done) {
+    console.log('scenario 8 — Escape ignored: fallback chain still preserves the search:');
+    var diags = harness.msgOf(env8, 'DIAG');
+    var visitDiags = diags.filter(function (m) { return m.payload.reason === 'phase2-visit'; });
+    var enriched = harness.msgOf(env8, 'LEADS_ENRICHED').length;
+    t('both visits completed', function () { assert(enriched === 2, 'enriches=' + enriched); });
+    t('fallback method used and recorded', function () {
+      var methods = visitDiags.map(function (m) { return m.payload.closeMethod; });
+      assert(methods.length === 2 && methods.every(function (m) { return m === 'span' || m === 'button'; }),
+        'methods=' + JSON.stringify(methods));
+    });
+    t('no reset / no failure diags', function () {
+      var reasons = diags.map(function (m) { return m.payload.reason; });
+      assert(reasons.indexOf('phase2-close-reset') === -1 && reasons.indexOf('phase2-close-failed') === -1,
+        reasons.join(','));
+    });
+    t('search route preserved and DONE clean', function () {
+      assert(/\/maps\/search\//.test(global.location.href), 'route lost');
       assert(done.payload.reason === 'end', done.payload.reason);
     });
   });

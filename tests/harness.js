@@ -63,6 +63,7 @@ function shrinkTimers(GMLE, panelTimeoutMs) {
   v.panelTimeoutMs = panelTimeoutMs || 300;
   v.feedReturnTimeoutMs = 50;
   v.feedReadyTimeoutMs = 50;
+  v.closeSettleMs = 20;
   v.delayMinMs = 5;
   v.delayMaxMs = 10;
   GMLE.config.captchaPollMs = 5;
@@ -127,9 +128,17 @@ function buildFeed(env, cards) {
   return feed;
 }
 
+// Point the mock page at a /maps/search/ URL (the panel-dismissal logic
+// verifies the search route survived each close). Safe to call after load:
+// content.js only reads location.href at load time to arm its idle interval.
+function setSearchRoute(env) {
+  global.location.href = 'https://www.google.com/maps/search/test+query/@1,2,3z';
+}
+
 // Build an onclick for a card anchor that "opens" a mock detail panel:
 // div[role=main][aria-label=name] + data-item-id buttons + Close button.
 // info: { dead: true } -> nothing happens (panel-timeout path).
+// info: { noEscape: true } -> Escape does NOT dismiss (fallback-chain path).
 // info: { phoneText, phoneAria, website, address, addressNoAria }
 function panelOpener(env, closeButtons) {
   var mockdom = require('./mockdom.js');
@@ -166,9 +175,19 @@ function panelOpener(env, closeButtons) {
     };
     env.document.body.appendChild(closeBtn);
     if (closeButtons) closeButtons.push(closeBtn);
+    // Mock Maps keyboard handling: Escape dismisses the panel WITHOUT
+    // touching the search route (the behavior we want the extension to use).
+    if (!info.noEscape) {
+      main.onkeydown = function (ev) {
+        if (ev && ev.key === 'Escape') {
+          env.document.body.removeChild(main);
+          env.document.body.removeChild(closeBtn);
+        }
+      };
+    }
   };
 }
 
 module.exports = { load: load, shrinkTimers: shrinkTimers, start: start, stop: stop,
   waitFor: waitFor, assert: assert, msgOf: msgOf, buildFeed: buildFeed,
-  panelOpener: panelOpener };
+  panelOpener: panelOpener, setSearchRoute: setSearchRoute };

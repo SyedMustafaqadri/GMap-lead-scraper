@@ -51,6 +51,7 @@ GMLE.config = {
     panelTimeoutMs: 8000,       // wait for the detail panel to open
     feedReturnTimeoutMs: 20000, // wait for the feed back (healthy) after close
     feedReadyTimeoutMs: 15000,  // extra wait before starting visits on a busy feed
+    closeSettleMs: 1500,        // wait after each dismissal attempt before verifying
     delayMinMs: 2000,           // random 2-4s between visits (human-like)
     delayMaxMs: 4000
   },

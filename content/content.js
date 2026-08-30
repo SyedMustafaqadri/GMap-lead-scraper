@@ -357,20 +357,72 @@
     });
   }
 
-  // Wait for the feed back after a panel close — and healthy: present, with
-  // cards, and not showing the loading spinner. On the 2026-08-30 run an
-  // empty re-rendering feed passed the old "feed exists" check while the
-  // search context was gone, so every remaining visit failed.
-  function waitFeedBack(timeoutMs) {
-    var start = Date.now();
-    return new Promise(function (resolve) {
-      function poll() {
-        if (isFeedHealthy()) { resolve(true); return; }
-        if (Date.now() - start >= timeoutMs) { resolve(false); return; }
-        gmSleep(250).then(poll);
+  // ---- panel dismissal (bypass the SPA history reset) -----------------------
+  // The native Close button's jsaction handler history.back()s past the
+  // search entry to the landing URL (2026-08-30 Sacramento: right after one
+  // successful visit, the URL fell to /maps/@lat,lng?entry=ttu and the feed
+  // emptied — all remaining visits lost). So never blindly click Close:
+  // try gentler dismissals first (Escape key, then the outer jsaction span,
+  // then the inner button) and VERIFY after each that the panel closed AND
+  // the /maps/search/ route + feed anchors survived.
+  function searchRouteIntact() {
+    return /\/maps\/search\//.test(location.href);
+  }
+
+  function keyEvent(type) {
+    try {
+      return new KeyboardEvent(type, {
+        key: 'Escape', code: 'Escape', keyCode: 27, which: 27,
+        bubbles: true, cancelable: true
+      });
+    } catch (e) {
+      return { type: type, key: 'Escape', keyCode: 27, bubbles: true }; // non-browser env
+    }
+  }
+
+  function escapeClose() {
+    var anchor = document.querySelector('button[data-item-id="address"]');
+    var target = (anchor && anchor.closest && anchor.closest('div[role="main"]')) || document.body;
+    target.dispatchEvent(keyEvent('keydown'));
+    target.dispatchEvent(keyEvent('keyup'));
+  }
+
+  function outerSpanClose() {
+    var btn = document.querySelector('button[aria-label="Close"]');
+    if (!btn || !btn.closest) return;
+    var wrap = btn.closest('span[jsaction]');
+    if (wrap) wrap.click();
+  }
+
+  function innerButtonClose() {
+    var btn = document.querySelector('button[aria-label="Close"]');
+    if (btn) btn.click();
+  }
+
+  // Dismiss the open panel and check the outcome.
+  // Returns { result: 'ok'|'reset'|'failed', method: 'escape'|'span'|'button'|'none' }:
+  //   ok     — panel closed, feed healthy, /maps/search/ route intact
+  //   reset  — panel closed but Maps dropped the search session (abort visits)
+  //   failed — panel would not close (abort visits; clicking further is unsafe)
+  function dismissPanel(lead) {
+    var attempts = [
+      { name: 'escape', fn: escapeClose },
+      { name: 'span', fn: outerSpanClose },
+      { name: 'button', fn: innerButtonClose }
+    ];
+    function tryIdx(idx) {
+      if (idx >= attempts.length) {
+        return Promise.resolve({ result: 'failed', method: 'none' });
       }
-      gmSleep(250).then(poll);
-    });
+      var a = attempts[idx];
+      a.fn();
+      return gmSleep(cfg.visit.closeSettleMs).then(function () {
+        if (panelOpen(lead.name)) return tryIdx(idx + 1);
+        if (isFeedHealthy() && searchRouteIntact()) return { result: 'ok', method: a.name };
+        return { result: 'reset', method: a.name };
+      });
+    }
+    return tryIdx(0);
   }
 
   // Scrape the open detail panel (hooks per the 2026-08-30 DOM capture; aria/
@@ -399,6 +451,16 @@
     findCardAnchor(lead.mapsUrl).then(function (anchor) {
       if (!running) return;
       if (!anchor) {
+        // If the search session is gone entirely, every remaining visit
+        // would fail — abort cleanly instead of skipping one by one.
+        if (!searchRouteIntact()) {
+          GMLE.post(GMLE.MSG.DIAG, Object.assign({
+            reason: 'phase2-search-reset', remaining: visitQueue.length, name: lead.name
+          }, diag()));
+          visitQueue = [];
+          finishNow();
+          return;
+        }
         GMLE.post(GMLE.MSG.DIAG, Object.assign({ reason: 'phase2-card-not-found', name: lead.name }, diag()));
         visitQueue.shift();
         afterVisit();
@@ -423,17 +485,16 @@
 
   function closePanelAndContinue(lead, updates) {
     visitQueue.shift();
-    var closeBtn = document.querySelector('button[aria-label="Close"]');
-    if (closeBtn) closeBtn.click();
-    // Wait for the feed to return healthy before the next visit — same
-    // feed-lost waiting the scroll loop relies on. If it never does, the
-    // search context is gone: stop visiting instead of failing one by one.
-    waitFeedBack(cfg.visit.feedReturnTimeoutMs).then(function (back) {
+    dismissPanel(lead).then(function (res) {
       if (!running) return;
-      if (!back) {
+      if (res.result !== 'ok') {
         GMLE.post(GMLE.MSG.DIAG, Object.assign({
-          reason: 'phase2-feed-not-restored', remaining: visitQueue.length
+          reason: res.result === 'reset' ? 'phase2-close-reset' : 'phase2-close-failed',
+          closeMethod: res.method,
+          name: lead.name
         }, diag()));
+        // Reset or stuck panel: remaining visits can't proceed — end the run
+        // cleanly so DONE fires and the export happens with what we have.
         visitQueue = [];
         finishNow();
         return;
@@ -443,6 +504,7 @@
         name: lead.name,
         index: visitTotal - visitQueue.length,
         total: visitTotal,
+        closeMethod: res.method,
         gotPhone: !!updates.phone,
         gotWebsite: !!updates.website,
         gotAddress: !!updates.address

@@ -44,6 +44,29 @@ MockElement.prototype.click = function () {
   if (typeof this.onclick === 'function') this.onclick({ preventDefault: function () {} });
 };
 
+MockElement.prototype.closest = function (sel) {
+  var parsed = parseSelector(sel);
+  var el = this;
+  while (el) {
+    if (matches(el, parsed)) return el;
+    el = el.parentElement;
+  }
+  return null;
+};
+
+// Record dispatched events (and honor on<type> handlers) so keyboard
+// dismissal can be simulated; events bubble to ancestors like real DOM.
+MockElement.prototype.dispatchEvent = function (ev) {
+  var el = this;
+  while (el) {
+    el.__events = el.__events || [];
+    el.__events.push(ev);
+    if (typeof el['on' + ev.type] === 'function') el['on' + ev.type](ev);
+    el = el.parentElement;
+  }
+  return true;
+};
+
 MockElement.prototype._walk = function (fn) {
   fn(this);
   for (var i = 0; i < this.children.length; i++) this.children[i]._walk(fn);
