@@ -37,3 +37,13 @@ status: active
 - **Date:** 2026-08-29
 - **Rationale:** Developer needs real-time state, background event tracing, and execution logs without shipping debug UI to regular users. Chosen: `GMLE.DEV_MODE` flag in `modules/config.js` (no UI toggle, user choice). `modules/messaging.js` exposes an optional trace tap recording every send/recv; the service worker (the hub of all traffic) owns ring buffers in `modules/debug.js` (300 events / 300 logs) and streams them to the overlay debug drawer via tab-targeted `DEBUG_*` messages while the drawer is open (backlog flushed on open). Runtime broadcasts don't reach content scripts, so all UI pushes are tab-targeted.
 - **Related:** [[06 Modules/Debug]], [[02 Architecture/Components]]
+
+## D-007 — Two-phase UI visiting replaces detail-page `fetch()` for phone/website
+- **Date:** 2026-08-30
+- **Rationale:** Content-script `fetch()` of each place URL was silently intercepted by Maps' page service worker / CSP (2026-08-30 restaurant run: zero phones/websites, zero errors — silent catch hid it). Clicking the card and scraping the opened detail panel uses the same document and the page's own SPA navigation, which cannot be intercepted the same way, and the panel exposes stable `data-item-id` hooks (address/phone/authority). Sequence per lead: CAPTCHA gate → find card anchor by mapsUrl prefix (one top-scroll retry for virtualized cards) → `anchor.click()` (SPA; never `location.href`, which would reload and kill the content script) → wait for panel (`div[role="main"]` aria-label matching the place name, and/or `button[data-item-id="address"]`; 8 s timeout → DIAG + skip) → scrape phone/website/full address → `button[aria-label="Close"]` → wait for `[role="feed"]` back → random 1–2 s. DONE fires only after the visit queue drains; the SW refreshes `job.lastLeadTs` on each merge so the 300 s idle watchdog survives long drains. Cost: ~1.5–3 s per lead needing a visit — accepted trade-off for actually getting the data.
+- **Related:** [[02 Architecture/Maps DOM Reference]], [[06 Modules/Content Script]], [[06 Modules/Service Worker]]
+
+## D-008 — Panel address overwrites the card address (upgrade semantics)
+- **Date:** 2026-08-30
+- **Rationale:** `LEADS_ENRICHED` phone/website merges fill blanks only (never overwrite card data). Address is different: the feed card truncates the address while `button[data-item-id="address"]` in the panel carries the full one, so the merge treats address as an upgrade and overwrites it whenever the panel provides one. Recorded because the asymmetry is intentional.
+- **Related:** [[06 Modules/Service Worker]], [[02 Architecture/Data Model]]

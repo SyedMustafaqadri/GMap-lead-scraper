@@ -65,17 +65,17 @@ Centralized in `content/selectors.js`. Prefer, in order: `itemprop` microdata �
 - **Name:** `h1` inside the panel (aria-label/panel aria-label is the stable hook).
 - **Rating/reviews:** `span[role="img"][aria-label="248 reviews"]` next to the rating number.
 - **Address (STABLE):** `button[data-item-id="address"]` → `aria-label="Address: <full address>"`; inner `div` holds the text. Much better quality than the card's truncated address.
-- **Phone (STABLE pattern, verify live):** info rows use `button[data-item-id="phone:tel:<number>"]` → text/aria-label holds the display number. (Pattern proven by the address row; phone row was below the paste cutoff.)
+- **Phone (STABLE pattern, verify live):** info rows use `button[data-item-id="phone:tel:<number>"]` → the display number is in the button's inner `div` text, falling back to an aria-label like `Phone: <number>`. Both presentations are handled by the phase-2 scraper (`scrapePanel` in `content/content.js`); the number is validated with the shared digit-count phone matcher. (Pattern proven by the address row; live-run verification of the exact label still pending.)
 - **Website (STABLE pattern):** `a[data-item-id^="authority"]` → `href` is the business site. (Classic Maps hook; verify live.)
 - **Category:** a button whose `jsaction` ends in `.category` (minified class) — text is the category.
 - **Hours:** `div` with the clock icon + `table` of weekday rows — not needed for export.
 - **Close:** `button[aria-label="Close"]` at the panel top. History back also restores the feed.
 
 ## Implications for the next feature (two-phase detail visiting)
-1. Card parsing must be **part-based** (split lines on `·`, classify each part) — line-level filters broke on the restaurant layout (`4.7(4,699) · Rs 1,000–7,000` leaked into Category/Address on the 2026-08-30 restaurant run).
-2. Skip `[aria-label="Sponsored"]` cards entirely.
-3. Phones/websites for layouts without card-level data: click the card → scrape the detail panel (`data-item-id` hooks) → close → wait for `[role="feed"]` to return. Do NOT fetch the place URL from the page — it was silently intercepted (page service worker / CSP) and returned no place data (2026-08-30 restaurant run: zero phones, zero errors).
-4. Card-level website hook `a[data-value="Website"]` can fill website without visiting (when present and not an ad).
+1. Card parsing must be **part-based** (split lines on `·`, classify each part) — line-level filters broke on the restaurant layout (`4.7(4,699) · Rs 1,000–7,000` leaked into Category/Address on the 2026-08-30 restaurant run). ✅ **Implemented 2026-08-30** in `content/extractors.js`.
+2. Skip `[aria-label="Sponsored"]` cards entirely. ✅ **Implemented** (`fromAnchor` returns null; `extractAll` skips it).
+3. Phones/websites for layouts without card-level data: click the card → scrape the detail panel (`data-item-id` hooks) → close → wait for `[role="feed"]` to return. Do NOT fetch the place URL from the page — it was silently intercepted (page service worker / CSP) and returned no place data (2026-08-30 restaurant run: zero phones, zero errors). ✅ **Implemented 2026-08-30** ([[03 Decisions/Decision Log|D-007]]); the fetch path was removed.
+4. Card-level website hook `a[data-value="Website"]` can fill website without visiting (when present and not an ad). ✅ **Implemented** (`selectors.websiteOf` prefers it; `/aclk` rejected; fallback hostname regex fixed to cover `google.com`).
 
 ## Related
 - [[05 Pitfalls/Do Not Guess DOM]]

@@ -32,5 +32,14 @@ The overlay is injected into a third-party page whose CSS and stacking contexts 
 ## R-008 — Orphaned job after mid-run hard navigation (Low)
 A hard navigation destroys the overlay/content script; `pagehide` posts `STOP`, but if that send fails the job idles until the SW watchdog (300 s) stops it. A reopened overlay rehydrates state, so impact is bounded. **Mitigation:** watchdog + rehydration; future: SW-side tab-liveness check. Status: open.
 
+## R-009 — Phase-2 click volume may trigger rate limiting (Medium, new 2026-08-30)
+Detail-panel visiting clicks one place per ~1.5–3 s after the feed run; a 100-lead job can mean ~100 rapid card openings. This raises CAPTCHA/throttling probability. **Mitigation:** random 1–2 s inter-visit delay, CAPTCHA detection + pause before every visit, DIAG progress per visit (`phase2-visit`). Status: open — verify on the live restaurant run; if throttled, raise `cfg.visit.delayMinMs/MaxMs`.
+
+## R-010 — Virtualized card anchors missing at phase 2 (Low, new 2026-08-30)
+Maps may virtualize feed cards away after long scrolls, so a lead's anchor may not be in the DOM when phase 2 runs. **Mitigation:** `findCardAnchor` retries once after scrolling the feed back to top; if still missing the lead is skipped with a `phase2-card-not-found` DIAG (blank phone/website survive per spec §30). Status: open — watch for skip counts in the debug drawer.
+
+## Resolved 2026-08-30 — detail-page `fetch()` silently intercepted
+The content-script `fetch()` detail-page path (added 2026-08-29 for phones) returned zero data with zero errors on the restaurant run (page SW/CSP interception). Removed entirely, replaced by two-phase UI visiting ([[03 Decisions/Decision Log|D-007]]). R-004 (enrichment hangs) unaffected — that covers SW-side website fetches.
+
 ## D-005 debt — export only offers the current/most-recent job
 The overlay exposes export for the rehydrated current job only; there is no job list/history UI (IndexedDB `jobs` store has the data). Deferred until a real need exists.

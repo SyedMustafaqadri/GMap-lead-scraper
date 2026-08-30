@@ -26,16 +26,18 @@ status: active
 ## Implementation (in progress)
 - [x] Extension scaffold / folder structure
 - [x] Manifest V3
-- [x] Side Panel UI
+- [x] Side Panel UI (superseded by [[06 Modules/Overlay UI]], D-005)
 - [x] Content Script extraction (on stable hooks, best-effort)
 - [x] Service Worker orchestration
 - [x] IndexedDB persistence
 - [x] Deduplication
 - [x] Enrichment workers
 - [x] XLSX export (in panel)
+- [x] Two-phase detail scraping (panel visits for phone/website/address) + per-part card classification — 2026-08-30, commit `cd2ad1c`; see [[06 Modules/Content Script]], [[03 Decisions/Decision Log|D-007]]
+- [x] Node mocked-DOM test suites (`tests/`, run with `node tests/test-<name>.js`)
 - [ ] Load unpacked in Chrome + fix any load/runtime errors
 - [ ] Demo-mode pipeline test (set `GMLE.DEMO_MODE=true`)
-- [ ] Live-Maps test + tune `extractors.js` with fuller DOM capture
+- [ ] Live-Maps verification: restaurant run (clean Category/Address, populated Phone/Website) + clinic regression + DONE-waits-for-visits
 
 ## Related
 - [[01 Project State/Project State]]

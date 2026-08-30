@@ -4,12 +4,13 @@
 
 ## Quick Context
 - **Project:** Private Chrome extension (Manifest V3) that extracts Google Maps leads → `.xlsx`.
-- **Status:** V2 UI implemented (2026-08-29): floating Shadow-DOM overlay panel replaces the side panel; dev debug drawer added. Live browser verification pending.
-- **Current objective:** Verify the V2 overlay end-to-end (load unpacked → toolbar toggle → demo run → debug drawer), then finish live-DOM tuning of `extractors.js`.
+- **Status:** Two-phase detail scraping + per-part card classification **implemented and mocked-DOM tested** (2026-08-30, commit `cd2ad1c`, local only). Live-Maps verification pending.
+- **Current objective:** User live test — restaurant search to ~100 leads (clean Category/Address, populated Phone/Website), clinic regression, DONE-waits-for-visits; then push on user's word.
 - **Architecture style:** local-first Chrome MV3 extension (no backend).
 - **UI:** `overlay/` module (dormant content script, top-right panel + trigger button); export runs in the service worker; debug via `GMLE.DEV_MODE` flag in `modules/config.js`. See [[06 Modules/Overlay UI]].
+- **Extraction:** phase 1 scroll+extract (`content/content.js` loop); phase 2 visits each lead's detail panel via SPA clicks (`data-item-id` hooks) for phone/website/address — the old `fetch()` path was silently intercepted and removed ([[03 Decisions/Decision Log|D-007]]). Tests: `node tests/test-<name>.js` (mock DOM).
 - **Source of truth:** `Specs.md` (repo root), until a [[03 Decisions/Decision Log|D-0XX]] decision overturns it (D-005 overturns the side-panel UI parts).
-- **Last Verified:** 2026-08-29
+- **Last Verified:** 2026-08-30 (Node test suites; live Maps run pending)
 
 ## Map of Content
 
@@ -34,7 +35,9 @@
 ### Modules (created during dev)
 - [[06 Modules/Overlay UI]] — floating overlay panel + trigger button (V2 UI)
 - [[06 Modules/Debug]] — dev debug drawer + trace/log core
-- `06 Modules/` — remaining component notes (Content Script, Service Worker, Storage, Enrichment, XLSX) still to be created as worked on
+- [[06 Modules/Content Script]] — scroll loop, card parsing, phase-2 detail visits
+- [[06 Modules/Service Worker]] — orchestration, merge, export, watchdog
+- `06 Modules/` — remaining component notes (Storage, Enrichment, XLSX) still to be created as worked on
 
 ### Risks & Debt
 - [[07 Risks & Debt/Risks & Technical Debt]] — known risks, severity, status

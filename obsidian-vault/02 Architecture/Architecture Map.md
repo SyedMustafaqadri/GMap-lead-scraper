@@ -12,8 +12,8 @@ Private, **local-first Chrome extension (Manifest V3)** that extracts leads from
 ## Architecture style
 Local-first Chrome MV3 extension. Three separated concerns: Overlay UI (injected into the Maps page, replaces the former side panel — [[03 Decisions/Decision Log|D-005]]), Content Script (Maps DOM), Service Worker (orchestration + XLSX export). Persistence via IndexedDB + chrome.storage.
 
-## System flow (spec §46, updated 2026-08-29)
-GOOGLE MAPS → Content Script (DOM extract / scroll / observe) → Messages → Service Worker (state machine, job mgmt, dedupe, queue, XLSX + downloads) → { IndexedDB, Enrichment Workers, Overlay UI (tab-targeted messages) } → leads.xlsx
+## System flow (spec §46, updated 2026-08-30)
+GOOGLE MAPS → Content Script (phase 1: DOM extract / scroll / observe → phase 2: detail-panel visits per [[03 Decisions/Decision Log|D-007]]) → Messages → Service Worker (state machine, job mgmt, dedupe, merge, queue, XLSX + downloads) → { IndexedDB, Enrichment Workers, Overlay UI (tab-targeted messages) } → leads.xlsx
 
 ## Key decisions
 - Chrome-only MVP; Manifest V3 (spec §42–§43).

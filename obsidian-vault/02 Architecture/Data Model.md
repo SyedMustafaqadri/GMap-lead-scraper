@@ -13,6 +13,9 @@ Leads are stored in **IndexedDB** (primary), small metadata in `chrome.storage`,
 ### Lead schema (§16, §17)
 `Business Name, Category, Rating, Review Count, Address, Phone, Website, Email, Google Maps URL`. Fields are independent/configurable; future: Opening Hours, Lat/Long, Social Links.
 
+### Field merge semantics (2026-08-30, `handleLeadEnriched` in background.js)
+`LEADS_ENRICHED {jobId, fp, updates}` merges detail-panel findings into the stored lead by fingerprint: **phone and website fill blanks only** (card data, when present, is never overwritten); **address is an upgrade** — the panel carries the full address while the card one is truncated, so it overwrites ([[03 Decisions/Decision Log|D-008]]). A newly filled website re-queues email enrichment.
+
 ### Storage tiers (§20–§21)
 - **In-memory `ExtractionJob`:** `jobId, searchQuery, targetLeads, status, startedAt, leads, duplicateCount, enrichmentStats, lastCheckpoint`. Fast, not crash-safe.
 - **chrome.storage:** small metadata — current job ID, status, user settings, target, selected fields, timestamps, checkpoint metadata.

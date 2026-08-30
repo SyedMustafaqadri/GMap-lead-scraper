@@ -18,13 +18,15 @@ Three extension pieces, strictly separated by concern: Overlay UI (in-page float
 ### Content Script (§44)
 - The only component touching the Google Maps DOM for extraction.
 - Responsibilities: detect Maps state & search, locate results/scroll container, observe DOM, extract business info, scroll, detect loading/CAPTCHA, report to service worker.
+- **Two-phase extraction (2026-08-30, [[03 Decisions/Decision Log|D-007]]):** phase 1 scrolls the feed and extracts cards; phase 2 (after the feed is exhausted) clicks each lead's card and scrapes the opened detail panel (`data-item-id` hooks) for phone/website/full address, posting `LEADS_ENRICHED` per visit. DONE waits until the visit queue drains. Details in [[06 Modules/Content Script]].
 
 ### Service Worker (§44)
 - Coordination brain.
 - Responsibilities: job management, extraction state machine, start/stop, deduplication, persistence coordination, enrichment queue, **XLSX generation + `chrome.downloads`** (moved from the panel in D-005), toolbar-click handling (`chrome.action.onClicked` + executeScript fallback), debug trace hub.
 
-### Message flow (§45, updated 2026-08-29)
+### Message flow (§45, updated 2026-08-30)
 - Overlay `START_EXTRACTION` (no tabId — SW uses `sender.tab.id`) → Content `START` → `LEADS_DISCOVERED` → SW (dedupe → persist → enrich) → `STATUS_UPDATE`/`STATE_CHANGED` back to the overlay tab.
+- Phase 2: Content `LEADS_ENRICHED {jobId, fp, updates}` per detail-panel visit → SW merges (phone/website fill blanks, address upgrades, [[03 Decisions/Decision Log|D-008]]) → then Content `DONE` (only after the visit queue drains) → SW finalizes + exports.
 - Overlay `REQUEST_STATUS` on open → SW rehydrates state. `REQUEST_EXPORT` → SW builds xlsx + downloads.
 - **Transport rule:** content scripts never receive `runtime.sendMessage` broadcasts; every UI-facing push uses `tabs.sendMessage` (`GMLE.postToTab`) targeted at the overlay's tab. Debug traffic (`DEBUG_*`) flows only to the tab whose drawer is open.
 
