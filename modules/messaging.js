@@ -30,7 +30,13 @@ GMLE.MSG = {
   // to a dead session (browser was closed mid-run). The SW asks the job's
   // tab; only a content script with an actually-running loop answers.
   CHECK_JOB: 'CHECK_JOB',
-  JOB_ACK: 'JOB_ACK'
+  JOB_ACK: 'JOB_ACK',
+  // Keepalive round trip: content pings the running SW every ~20s so it
+  // never suspends mid-run (a suspended SW silently ate every message on
+  // the 2026-08-30 Kansas City run — leads froze, Stop became a no-op).
+  // Also doubles as a connection watchdog on the content side.
+  PING: 'PING',
+  PONG: 'PONG'
 };
 
 // Context tag for trace/debug: 'sw' in the service worker, 'content' in
@@ -51,9 +57,18 @@ GMLE.post = function (type, payload) {
   GMLE._trace('send', type, payload);
   try {
     var p = chrome.runtime.sendMessage({ type: type, payload: payload });
-    if (p && p.catch) p.catch(function () {});
+    if (p && p.catch) {
+      p.catch(function (e) {
+        // Never swallow silently: a suspended/dead SW must be visible in the
+        // console (2026-08-30: messages were dropped without a trace).
+        console.warn('[gmle] post ' + type + ' failed:', (e && e.message) || e);
+      });
+    }
     return p;
-  } catch (e) { return Promise.resolve(); }
+  } catch (e) {
+    console.warn('[gmle] post ' + type + ' threw:', (e && e.message) || e);
+    return Promise.resolve();
+  }
 };
 
 GMLE.postToTab = function (tabId, type, payload) {

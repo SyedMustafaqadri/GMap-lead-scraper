@@ -45,6 +45,10 @@ function ensureJobRestored(notifyTabId) {
             GMLE.jobManager.remove(id);
             GMLE.storage.setCurrentJobId(null);
             currentJobId = null;
+            // Allow future restore attempts: without this the abandoned
+            // result is cached forever and STOP/lead intake stay dead even
+            // once the tab proves it is live.
+            restorePromise = null;
             GMLE.debug.log('info', 'sw', 'abandoned stale job=' + id + ' (no live loop in tab)');
             if (notifyTabId != null) {
               GMLE.postToTab(notifyTabId, GMLE.MSG.STATE_CHANGED, { jobId: id, state: GMLE.States.IDLE, searchQuery: pj.searchQuery });
@@ -68,7 +72,7 @@ function ensureJobRestored(notifyTabId) {
             GMLE.debug.log('info', 'sw', 'restored live job=' + id + ' leads=' + leads.length + ' (SW restart)');
             resolve();
           });
-        }, 1200);
+        }, 2500);
       });
     });
   }).catch(function (e) {
@@ -342,9 +346,33 @@ GMLE.onMessage(function (msg, sender) {
     if (ackCb) ackCb();
     return;
   }
+  if (type === GMLE.MSG.PING) {
+    // Content keepalive round trip (excluded from the debug trace): resets
+    // the SW idle timer so the worker never suspends mid-run.
+    if (sender && sender.tab && sender.tab.id != null) {
+      GMLE.postToTab(sender.tab.id, GMLE.MSG.PONG, payload);
+    }
+    return;
+  }
+  if (type === GMLE.MSG.ERROR) {
+    // Content-side connection warnings: relay to the tab's overlay.
+    if (sender && sender.tab && sender.tab.id != null) {
+      GMLE.postToTab(sender.tab.id, GMLE.MSG.ERROR, payload);
+    }
+    return;
+  }
   if (type === GMLE.MSG.START_EXTRACTION) { startExtraction(payload, sender); return; }
   if (type === GMLE.MSG.STOP) {
-    ensureJobRestored(sender && sender.tab ? sender.tab.id : null).then(function () { stopJob(payload.jobId); });
+    ensureJobRestored(sender && sender.tab ? sender.tab.id : null).then(function () {
+      if (GMLE.jobManager.get(payload.jobId)) { stopJob(payload.jobId); return; }
+      // Job unknown (lost across an SW restart / restore failure). Never
+      // leave Stop dead: forward it anyway — the tab will DONE and the DONE
+      // handler flushes the export from storage.
+      GMLE.debug.log('warn', 'sw', 'STOP for unknown job=' + payload.jobId + ' — forwarding to tab');
+      if (sender && sender.tab && sender.tab.id != null) {
+        GMLE.postToTab(sender.tab.id, GMLE.MSG.STOP, { jobId: payload.jobId });
+      }
+    });
     return;
   }
   if (type === GMLE.MSG.LEADS_DISCOVERED) {
@@ -355,7 +383,24 @@ GMLE.onMessage(function (msg, sender) {
     ensureJobRestored().then(function () { handleLeadEnriched(payload); });
     return;
   }
-  if (type === GMLE.MSG.DONE) { ensureJobRestored().then(function () { finalizeJob(payload.jobId); }); return; }
+  if (type === GMLE.MSG.DONE) {
+    ensureJobRestored().then(function () {
+      if (GMLE.jobManager.get(payload.jobId)) { finalizeJob(payload.jobId); return; }
+      // DONE for a job the SW doesn't know (restore failed / pointer lost
+      // while the content loop kept running). Never silently drop it:
+      // release the overlay and export whatever is in storage.
+      GMLE.debug.log('warn', 'sw', 'DONE for unknown job=' + payload.jobId + ' — flushing storage export');
+      GMLE.storage.setCurrentJobId(null).then(function () {
+        currentJobId = null;
+        var tabId = sender && sender.tab ? sender.tab.id : null;
+        if (tabId != null) {
+          GMLE.postToTab(tabId, GMLE.MSG.STATE_CHANGED, { jobId: payload.jobId, state: GMLE.States.COMPLETED, searchQuery: '' });
+        }
+        exportJob(payload.jobId, tabId);
+      });
+    });
+    return;
+  }
   if (type === GMLE.MSG.CAPTCHA) {
     var jc = GMLE.jobManager.get(payload.jobId);
     if (jc) {

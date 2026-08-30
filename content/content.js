@@ -158,8 +158,10 @@
 
   // Step smoothly down the feed; when close enough, glide fully to the
   // bottom — reaching the bottom IS the pagination trigger, so never stop
-  // short of it (an earlier margin cap prevented loading entirely).
-  function scrollFeedStep() {
+  // short of it (an earlier margin cap prevented loading entirely). With
+  // stalled growth (force), jump straight to the bottom so the trigger
+  // fires and the long bottom-wait budgets take over.
+  function scrollFeedStep(force) {
     var fed = document.querySelector(GMLE.selectors.feed);
     if (!fed) {
       var root = getFeed();
@@ -171,7 +173,7 @@
     var maxTop = Math.max(0, fed.scrollHeight - view);
     var distance = maxTop - fed.scrollTop;
     var step = view * randBetween(cfg.scroll.stepMin, cfg.scroll.stepMax);
-    var target = (distance <= step || distance <= view * 1.5)
+    var target = (force || distance <= step || distance <= view * 1.5)
       ? maxTop                      // in reach — glide to the bottom
       : fed.scrollTop + step;       // gradual human-like approach
     target = Math.min(target, maxTop);
@@ -453,6 +455,29 @@
     gmSleep(randBetween(cfg.visit.delayMinMs, cfg.visit.delayMaxMs)).then(visitNext);
   }
 
+  // ---- SW keepalive / connection watchdog ----------------------------------
+  // Chrome suspends the SW after ~30s idle; with a visible tab the loop's
+  // waits are local timers, so the SW can die mid-run (2026-08-30 Kansas
+  // City: leads froze, Stop became a no-op, messages dropped silently). A
+  // PING/PONG round trip every pingIntervalMs keeps the worker alive in
+  // both visible and hidden tabs (gmSleep delegates to the SW when hidden)
+  // and detects a lost connection loudly.
+  var pingSeq = 0;
+  var lastPongTs = 0;
+  var pingWarned = false;
+  function pingLoop() {
+    if (!running) return;
+    if (lastPongTs && Date.now() - lastPongTs > cfg.pingIntervalMs * 3 && !pingWarned) {
+      pingWarned = true;
+      console.warn('[gmle] service worker not responding — connection may be lost; extraction continues');
+      GMLE.post(GMLE.MSG.ERROR, {
+        message: 'Background connection lost — extraction continues, but Stop/Export may not work until the page is reloaded.'
+      });
+    }
+    GMLE.post(GMLE.MSG.PING, { seq: ++pingSeq });
+    gmSleep(cfg.pingIntervalMs).then(pingLoop);
+  }
+
   function loop() {
     if (!running) return;
 
@@ -544,8 +569,11 @@
       var proceed = function () {
         if (!running) return;
         // Don't scroll while the feed is loading a page — the next page
-        // lands at the bottom we're already at.
-        if (!feedSpinner() && document.querySelector(GMLE.selectors.feed)) scrollFeedStep();
+        // lands at the bottom we're already at. Stalled growth: jump
+        // straight to the pagination trigger at the bottom.
+        if (!feedSpinner() && document.querySelector(GMLE.selectors.feed)) {
+          scrollFeedStep(noAnchorStreak > 0);
+        }
         var delay = randBetween(cfg.scroll.minDelayMs, cfg.scroll.maxDelayMs);
         cyclesUntilPause--;
         if (cyclesUntilPause <= 0) {
@@ -587,6 +615,10 @@
       cooldownUsed = false;
       lastWaitMs = 0;
       cyclesUntilPause = Math.round(randBetween(cfg.scroll.readPauseEveryMin, cfg.scroll.readPauseEveryMax));
+      pingSeq = 0;
+      lastPongTs = Date.now();
+      pingWarned = false;
+      pingLoop();
       GMLE.post(GMLE.MSG.DIAG, diag());
       loop();
     } else if (type === GMLE.MSG.STOP) {
@@ -597,6 +629,10 @@
       // SW-side sleep finished (hidden-tab scheduling) — release the waiter.
       var waiter = tickWaiters[payload.tickId];
       if (waiter) { delete tickWaiters[payload.tickId]; waiter(); }
+    } else if (type === GMLE.MSG.PONG) {
+      // Keepalive reply: connection to the SW is alive.
+      lastPongTs = Date.now();
+      pingWarned = false;
     } else if (type === GMLE.MSG.CHECK_JOB) {
       // Liveness check from the SW: only confirm when this tab is genuinely
       // extracting that exact job — otherwise the SW abandons it as stale.

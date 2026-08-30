@@ -20,6 +20,7 @@ function makeEnv() {
 // 5 leads: 1-2 visit+enrich, 3 has card phone (website-only visit), 4 card
 // vanishes (virtualized), 5 panel never opens.
 var env = makeEnv();
+env.GMLE.config.pingIntervalMs = 30; // exercise the SW keepalive round trip
 env.places = {
   'https://www.google.com/maps/place/Alpha/1': {
     phoneText: '+92 21 33220642', website: 'https://alpha.example.com/',
@@ -105,6 +106,11 @@ harness.waitFor(function () {
   t('close clicked after each real panel (3 panels opened)', function () {
     assert(env.closeButtons.length === 3, 'close buttons=' + env.closeButtons.length);
     env.closeButtons.forEach(function (b, i) { assert(b.__clicked, 'close #' + i + ' not clicked'); });
+  });
+  t('PING keepalive posted while running (stops with the job)', function () {
+    var pings = harness.msgOf(env, 'PING').length;
+    assert(pings >= 1, 'pings=' + pings);
+    assert(done === env.messages[env.messages.length - 1], 'PING leaked after DONE');
   });
 
   // ---------------------------------------------------------------- scen. 2

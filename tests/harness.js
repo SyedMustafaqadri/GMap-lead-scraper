@@ -66,6 +66,7 @@ function shrinkTimers(GMLE, panelTimeoutMs) {
   v.delayMinMs = 5;
   v.delayMaxMs = 10;
   GMLE.config.captchaPollMs = 5;
+  GMLE.config.pingIntervalMs = 60000; // keepalive off in content tests (no SW to answer)
 }
 
 function start(env, fields) {

@@ -41,6 +41,10 @@ GMLE.config = {
     idleTimeoutMs: 300000
   },
   captchaPollMs: 2000,
+  // Content -> SW keepalive round trip while a job is running. Chrome
+  // suspends the SW after ~30s idle; with a visible tab the loop's waits
+  // are local timers, so without this the SW can die mid-run.
+  pingIntervalMs: 20000,
   // Phase 2 (detail-panel visiting): after the feed is exhausted, each lead
   // missing phone/website gets a card click → panel scrape → close cycle.
   visit: {
