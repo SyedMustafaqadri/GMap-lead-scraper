@@ -41,13 +41,16 @@ var clinicC = { name: 'Pearl Dental',
 var cafe = { name: 'Cafe X',
   href: 'https://www.google.com/maps/place/Cafe+X/5',
   lines: ['Cafe X', '4.5(123)', 'Cafe · Main Blvd, Gulberg'] };
+var visited = { name: 'A-1 Auto Repair',
+  href: 'https://www.google.com/maps/place/A-1+Auto+Repair/7',
+  lines: ['A-1 Auto Repair · Visited link', 'Auto repair shop · 2025 Broadway'] };
 var sponsored = { name: 'Ad Cafe',
   href: 'https://www.google.com/maps/place/Ad+Cafe/6',
   lines: ['Ad Cafe', 'Restaurant · Some Rd 1'],
   sponsored: true,
   websiteHref: 'https://www.google.com/aclk?sa=l&adurl=https://ad.example.com' };
 
-harness.buildFeed(env, [rest, clinicA, clinicB, clinicC, cafe, sponsored]);
+harness.buildFeed(env, [rest, clinicA, clinicB, clinicC, cafe, sponsored, visited]);
 
 var L;
 var failed = [];
@@ -90,6 +93,14 @@ L = leadFor(env, cafe);
 t('rating from innerText when no stars span', function () { assert(L.rating === '4.5' && L.reviews === '123', L.rating + '/' + L.reviews); });
 t('rating line does not leak into category', function () { assert(L.category === 'Cafe', 'category=' + L.category); });
 t('address', function () { assert(L.address === 'Main Blvd, Gulberg', 'address=' + L.address); });
+
+L = leadFor(env, visited);
+t('"· Visited link" suffix stripped from name', function () {
+  assert(L.name === 'A-1 Auto Repair', 'name=' + L.name);
+});
+t('visited card data still parsed', function () {
+  assert(L.category === 'Auto repair shop' && L.address === '2025 Broadway', L.category + '/' + L.address);
+});
 
 L = leadFor(env, sponsored);
 t('sponsored card skipped entirely', function () { assert(L == null, 'expected null, got ' + JSON.stringify(L)); });

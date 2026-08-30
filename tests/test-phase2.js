@@ -104,14 +104,12 @@ harness.waitFor(function () {
     var visits = diags.filter(function (r) { return r === 'phase2-visit'; }).length;
     assert(starts === 1 && visits === 4, 'starts=' + starts + ' visits=' + visits);
   });
-  t('close via Escape bypassed the native Close click on every panel', function () {
+  t('panels never closed mid-run; courtesy Escape dismissed the last one after DONE', function () {
     assert(env.closeButtons.length === 3, 'close buttons=' + env.closeButtons.length);
     env.closeButtons.forEach(function (b, i) {
-      assert(!b.__clicked, 'close #' + i + ' was clicked (should be Escape-dismissed)');
+      assert(!b.__clicked, 'close #' + i + ' was clicked (must be bypassed)');
     });
-    var visitDiags = harness.msgOf(env, 'DIAG').filter(function (m) { return m.payload.reason === 'phase2-visit'; });
-    assert(visitDiags.every(function (m) { return m.payload.closeMethod === 'escape'; }),
-      'closeMethod=' + JSON.stringify(visitDiags.map(function (m) { return m.payload.closeMethod; })));
+    assert(!env.document.body.querySelector('div[role="main"]'), 'final panel not dismissed after DONE');
     assert(/\/maps\/search\//.test(global.location.href), 'search route lost');
   });
   t('PING keepalive posted while running (stops with the job)', function () {
@@ -362,10 +360,11 @@ function scenario7() {
     card.children.forEach(function (ch) { if (ch.tagName === 'A') ch.onclick = harness.panelOpener(env7); });
   });
   env7.onSend = function (msg) {
-    // Simulate the 2026-08-30 failure: after the first panel closes, Maps
-    // drops the search session — the feed is gone entirely.
-    if (msg.type === 'LEADS_ENRICHED') {
-      setTimeout(function () { env7.document.body.removeChild(env7.feed); }, 10);
+    // Simulate the 2026-08-30 Sacramento failure: right after the first
+    // visit completes, Maps drops the search session — the feed is gone
+    // (removed deterministically once visit #1 is fully done).
+    if (msg.type === 'DIAG' && msg.payload && msg.payload.reason === 'phase2-visit') {
+      if (env7.feed.parentElement) env7.document.body.removeChild(env7.feed);
     }
   };
   harness.start(env7);
@@ -376,7 +375,7 @@ function scenario7() {
     console.log('scenario 7 — search context lost mid-drain: abort cleanly:');
     var diags = harness.msgOf(env7, 'DIAG').map(function (m) { return m.payload.reason; });
     var enriched = harness.msgOf(env7, 'LEADS_ENRICHED').length;
-    t('close-reset DIAG posted', function () { assert(diags.indexOf('phase2-close-reset') !== -1, diags.join(',')); });
+    t('search-reset DIAG posted', function () { assert(diags.indexOf('phase2-search-reset') !== -1, diags.join(',')); });
     t('exactly one visit before the abort', function () { assert(enriched === 1, 'enriches=' + enriched); });
     t('DONE still fires (export proceeds)', function () {
       assert(done.payload.reason === 'end', done.payload.reason);
@@ -385,9 +384,9 @@ function scenario7() {
 }
 
 // ---------------------------------------------------------------- scenario 8
-// Escape-unresponsive panel (Maps ignores synthetic keydown): the fallback
-// chain (outer span -> inner button) must still dismiss the panel, keep the
-// search route, and drain every visit — no re-search, no reset.
+// Maps ignores the synthetic Escape entirely (live-verified): the courtesy
+// close after DONE fails, but nothing depends on it — the run already
+// completed and exported, and the panel just stays open for the user.
 function scenario8() {
   var env8 = makeEnv();
   env8.places = {
@@ -406,23 +405,17 @@ function scenario8() {
     var done = harness.msgOf(env8, 'DONE');
     return done.length && done[done.length - 1];
   }, 10000, 'DONE with Escape-unresponsive panels (scenario 8)').then(function (done) {
-    console.log('scenario 8 — Escape ignored: fallback chain still preserves the search:');
-    var diags = harness.msgOf(env8, 'DIAG');
-    var visitDiags = diags.filter(function (m) { return m.payload.reason === 'phase2-visit'; });
+    console.log('scenario 8 — Escape ignored: run completes regardless (fire-and-forget courtesy close):');
+    var diags = harness.msgOf(env8, 'DIAG').map(function (m) { return m.payload.reason; });
     var enriched = harness.msgOf(env8, 'LEADS_ENRICHED').length;
-    t('both visits completed', function () { assert(enriched === 2, 'enriches=' + enriched); });
-    t('fallback method used and recorded', function () {
-      var methods = visitDiags.map(function (m) { return m.payload.closeMethod; });
-      assert(methods.length === 2 && methods.every(function (m) { return m === 'span' || m === 'button'; }),
-        'methods=' + JSON.stringify(methods));
+    t('both visits completed without any close', function () { assert(enriched === 2, 'enriches=' + enriched); });
+    t('native Close never clicked, no reset diags', function () {
+      env8.closeButtons.forEach(function (b, i) { assert(!b.__clicked, 'close #' + i + ' clicked'); });
+      assert(diags.indexOf('phase2-search-reset') === -1 && diags.indexOf('phase2-close-reset') === -1,
+        diags.join(','));
     });
-    t('no reset / no failure diags', function () {
-      var reasons = diags.map(function (m) { return m.payload.reason; });
-      assert(reasons.indexOf('phase2-close-reset') === -1 && reasons.indexOf('phase2-close-failed') === -1,
-        reasons.join(','));
-    });
-    t('search route preserved and DONE clean', function () {
-      assert(/\/maps\/search\//.test(global.location.href), 'route lost');
+    t('panel may remain open — run still DONE clean', function () {
+      assert(!!env8.document.body.querySelector('div[role="main"]'), 'panel should remain (Escape ignored)');
       assert(done.payload.reason === 'end', done.payload.reason);
     });
   });

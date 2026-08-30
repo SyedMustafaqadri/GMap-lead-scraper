@@ -7,7 +7,9 @@ GMLE.extractors = {
     // their data is not the business's. Skip the whole card (D-004 hooks).
     if (card && card.querySelector('h1[aria-label="Sponsored"]')) return null;
     var lines = this._lines(card);
-    var name = lines.length ? lines[0] : null;
+    // Maps appends "· Visited link" to cards the user opened before — strip
+    // it so the name (and phase-2 panel matching) stays clean.
+    var name = lines.length ? lines[0].replace(/\s*·\s*Visited link\s*$/i, '') : null;
     var ratingObj = this._rating(card);
     // Lines joined with newline so the phone matcher can work per line —
     // the phone occupies its own card line, which keeps it from gluing to

@@ -46,12 +46,13 @@ GMLE.config = {
   // are local timers, so without this the SW can die mid-run.
   pingIntervalMs: 20000,
   // Phase 2 (detail-panel visiting): after the feed is exhausted, each lead
-  // missing phone/website gets a card click → panel scrape → close cycle.
+  // missing phone/website gets a card click → panel scrape cycle. Panels are
+  // NEVER closed between visits (the Close button's jsaction handler resets
+  // Maps to the landing state) — the next card click swaps the panel content
+  // in place; one courtesy Escape runs after DONE, when nothing is at stake.
   visit: {
-    panelTimeoutMs: 8000,       // wait for the detail panel to open
-    feedReturnTimeoutMs: 20000, // wait for the feed back (healthy) after close
+    panelTimeoutMs: 8000,       // wait for the detail panel to open/swap
     feedReadyTimeoutMs: 15000,  // extra wait before starting visits on a busy feed
-    closeSettleMs: 1500,        // wait after each dismissal attempt before verifying
     delayMinMs: 2000,           // random 2-4s between visits (human-like)
     delayMaxMs: 4000
   },

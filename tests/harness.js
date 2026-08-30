@@ -61,9 +61,7 @@ function shrinkTimers(GMLE, panelTimeoutMs) {
   s.stallCooldownMs = 10;
   var v = GMLE.config.visit;
   v.panelTimeoutMs = panelTimeoutMs || 300;
-  v.feedReturnTimeoutMs = 50;
   v.feedReadyTimeoutMs = 50;
-  v.closeSettleMs = 20;
   v.delayMinMs = 5;
   v.delayMaxMs = 10;
   GMLE.config.captchaPollMs = 5;
@@ -146,6 +144,12 @@ function panelOpener(env, closeButtons) {
     var name = this.getAttribute('aria-label');
     var info = env.places[this.href.split('?')[0]] || {};
     if (info.dead) return;
+    // Mock Maps panel swap: opening a new place replaces the open panel in
+    // place (the search feed behind it stays untouched — no close, no reset).
+    if (env.panelMain && env.panelMain.parentElement) {
+      env.document.body.removeChild(env.panelMain);
+      env.document.body.removeChild(env.panelCloseBtn);
+    }
     var main = new mockdom.MockElement('div', { role: 'main', 'aria-label': name });
     env.document.body.appendChild(main);
     env.panelMain = main;
@@ -174,6 +178,7 @@ function panelOpener(env, closeButtons) {
       env.document.body.removeChild(closeBtn);
     };
     env.document.body.appendChild(closeBtn);
+    env.panelCloseBtn = closeBtn;
     if (closeButtons) closeButtons.push(closeBtn);
     // Mock Maps keyboard handling: Escape dismisses the panel WITHOUT
     // touching the search route (the behavior we want the extension to use).
