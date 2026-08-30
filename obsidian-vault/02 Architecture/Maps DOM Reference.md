@@ -69,7 +69,7 @@ Centralized in `content/selectors.js`. Prefer, in order: `itemprop` microdata �
 - **Website (STABLE pattern):** `a[data-item-id^="authority"]` → `href` is the business site. (Classic Maps hook; verify live.)
 - **Category:** a button whose `jsaction` ends in `.category` (minified class) — text is the category.
 - **Hours:** `div` with the clock icon + `table` of weekday rows — not needed for export.
-- **Close:** `button[aria-label="Close"]` at the panel top. History back also restores the feed.
+- **Close (careful — resets the session):** `button[aria-label="Close"]` at the panel top, wrapped in a jsaction container: `<span jsaction="JIbuQc:aj0Jcf" jslog="146078; track:click; mutable:true"><button class="VfPpkd-icon-LgbsSe …" aria-label="Close" jsaction="click:cOuCgd; mousedown:UX7yZ; …">`. **Clicking it (2026-08-30 Sacramento) fired the jsaction handler's `history.back()` past the search entry — the whole UI reset to the landing URL (`/maps/@lat,lng?entry=ttu`) and the search feed was lost.** Dismissal must therefore try Escape (KeyboardEvent keydown at the panel) and the outer `span[jsaction]` first, verifying the `/maps/search/` route survives (`dismissPanel` in `content/content.js`). History back also nominally restores the feed, but is not reliable. (The `jsaction` tokens are minified — match structure via `closest('span[jsaction]')`, never hardcode them.)
 
 ## Implications for the next feature (two-phase detail visiting)
 1. Card parsing must be **part-based** (split lines on `·`, classify each part) — line-level filters broke on the restaurant layout (`4.7(4,699) · Rs 1,000–7,000` leaked into Category/Address on the 2026-08-30 restaurant run). ✅ **Implemented 2026-08-30** in `content/extractors.js`.
