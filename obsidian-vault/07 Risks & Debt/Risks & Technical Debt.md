@@ -44,6 +44,9 @@ Observed live: clicking into a **stalled** feed (Google's loader hung on its spi
 ## R-012 — Single-search result cap (~100–120 leads) (Medium, product constraint)
 Google Maps serves only ~100–120 results per search regardless of query size; a 500 target cannot be met by one search (observed on the Dallas run: 76 leads, feed stalled near the cap). **Future feature:** multi-search strategy (split by area/zip/zoom, merge + dedupe across searches). Not a bug — expectation setting.
 
+## R-013 — SW suspension eats messages; mid-list stall variant (High → mitigated 2026-08-30)
+Observed on the Kansas City run: leads froze at 34 with the feed stalled **mid-list** (no spinner, not at bottom — a variant the spinner/bottom patience didn't cover), and the SW suspended ~30 s after its last message while the visible tab's loop kept running on local timers. Every later message (DIAGs, the user's STOP) was silently swallowed (`GMLE.post` caught all errors), so Stop had no job to stop and never completed (no xlsx). **Mitigation (commit `edb566d`):** 20 s PING/PONG keepalive keeps the SW alive for the whole run; send failures are logged, not swallowed; STOP is forwarded even for unknown jobs; DONE for unknown jobs flushes a storage-fallback export; stale-abandon resets the restore cache; stalled growth glides straight to the bottom trigger. Status: mitigated — confirm on live re-run (expect: no silent freezes; Stop always ends the run with an xlsx).
+
 ## Resolved 2026-08-30 — detail-page `fetch()` silently intercepted
 The content-script `fetch()` detail-page path (added 2026-08-29 for phones) returned zero data with zero errors on the restaurant run (page SW/CSP interception). Removed entirely, replaced by two-phase UI visiting ([[03 Decisions/Decision Log|D-007]]). R-004 (enrichment hangs) unaffected — that covers SW-side website fetches.
 

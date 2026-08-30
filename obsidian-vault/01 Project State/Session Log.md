@@ -4,6 +4,21 @@ type: session-log
 
 # Session Log
 
+## 2026-08-30 — Fix: dead Stop button after SW suspension + silent message loss
+- **RCA from the Kansas City log (`auto repair shop in Kansas City`, user-confirmed no xlsx downloaded):** leads froze at 34 (anchors stuck at 38, mid-list, `bottom:false spinner:false` — a new stall variant) while the visible tab's loop kept running on **local timers**. The SW suspended ~30 s after its last message; every subsequent message (DIAGs, the user's STOP) was **silently swallowed** (`GMLE.post` caught all send errors), so the trace went quiet after 18:38:00, the State snapshot showed `job:null / storedCurrentJobId:null`, and `stopJob()` no-op'd on the unknown job — Stop was dead. Also logged as [[07 Risks & Debt/Risks & Technical Debt|R-013]]: mid-list stall variant.
+- **Fixes (commit `edb566d`, local only):**
+  1. **SW keepalive (root-cause):** content PINGs the running SW every 20 s (`PING`/`PONG` round trip, excluded from the debug trace). The round trip resets the SW 30 s idle timer in visible *and* hidden tabs, so the worker can no longer suspend mid-run. If no PONG for 60 s → loud console warning + `ERROR` relayed to the overlay ("Background connection lost…").
+  2. **Unconditional STOP:** if the job is unknown to the SW, STOP is still forwarded to the requesting tab (warn log) instead of silently doing nothing.
+  3. **DONE for an unknown job flushes:** pointer cleared, overlay released (`STATE_CHANGED COMPLETED`), and `exportJob` runs from the IndexedDB storage fallback — the user always gets the file even if the job was lost.
+  4. **`GMLE.post` logs send failures** (`[gmle] post <TYPE> failed: …`) instead of swallowing them.
+  5. **Restore hardening:** stale-abandon now resets `restorePromise` (previously an abandoned/resolved restore was cached forever and blocked later restores); `CHECK_JOB` ack window widened 1.2 s → 2.5 s.
+  6. **Mid-list stall patience:** on stalled growth the scroll glides straight to the bottom pagination trigger (`scrollFeedStep(force)`), so the long bottom-wait budgets and the settle window apply to the Kansas variant too.
+- **Tests:** new `tests/test-sw-stop.js` — unknown-job STOP forwarded to the tab; unknown-job DONE → COMPLETED broadcast + storage-fallback export + pointer cleared; stale abandon clears pointer; after abandon a *new* stored job is still restorable (old code cached the resolved restore forever); ack path restores + STATUS_UPDATE. Phase-2 scenario 1 now asserts the PING keepalive runs while the job runs and stops with it. All 6 suites pass; `node --check` clean.
+**Completed:** Stop-button root cause fixed (keepalive) + belt-and-braces STOP/DONE paths + mid-list stall patience.
+**Pending:** User live re-test: run should no longer freeze silently; if something does fail, Stop must always end the run and produce an xlsx; check for the new `[gmle] post … failed` console warnings.
+**Blocker:** None.
+**Next:** Live verification; push on user's word.
+
 ## 2026-08-30 — Fix: premature end on slow feed + phase 2 destroyed the search session
 - **RCA from the user's live Dallas log (`auto repair shop in Dallas`):** phase 1 ran at ~1.8 s/lead, pages landed steadily to 80 anchors / 76 leads, then Google's feed loader **hung on its spinner** (anchors frozen, `feedTop` near bottom for ~80 s). The loop counted 8 dead cycles and declared `no-anchors-found` **while the feed was still loading**. Phase 2 then clicked Motor City (that visit worked), but closing the panel **dropped the search context entirely** — URL fell back to `/maps/@32.76…,-96.91…,12z`, feed present but empty (`anchorsPlace:0, feedH:0`). The old "wait for `[role=feed]` to exist" check passed on the empty re-rendering feed, so the remaining 32 visits each failed `phase2-card-not-found` at ~1.5 s apiece until the user hit Stop. Export itself was fine (76 clean leads). Note: a single Maps search tops out around ~100–120 results — the 500 target needs multiple narrower searches (future feature, not a bug).
 - **Fixes (commit `0b2bce0`, local only):**

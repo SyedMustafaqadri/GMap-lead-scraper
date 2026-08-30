@@ -7,30 +7,30 @@ status: active
 # Project State
 
 ## Current Objective
-Live verification round 2: the two live-run failures found on 2026-08-30 (premature end while Google's feed spinner was up; phase 2 destroying the search session) are fixed (commit `0b2bce0`, local only). User re-tests on a real search to confirm the pace and the phase-2 drain.
+Live verification round 3: the Kansas City run exposed a dead Stop button (SW suspended mid-run; messages silently dropped) and a mid-list feed stall. Both fixed (commit `edb566d`, local only): 20 s PING/PONG keepalive keeps the SW alive for the whole run, STOP/DONE now work even for unknown jobs, send failures are logged, and stalled growth glides to the bottom trigger.
 
 ## Current Module / Step
-`content/content.js` loop + phase 2 hardened: spinner patience (`feedSpinner`/`atBottom`, longer bottom waits, no dead-cycle counting while loading), 60 s settle window before `no-results`, phase-2 health gate, healthy feed-return check after each panel close, slower pacing + 2–4 s visit delay.
+Robustness pass on the SW↔content link: `modules/messaging.js` (PING/PONG, post-failure logging), `background.js` (unconditional STOP, unknown-job DONE flush, restore-cache reset, 2.5 s ack window), `content/content.js` (pingLoop watchdog, force-glide to bottom on stall). All verified in Node (6 suites).
 
 ## Completed
-- All fixes through 2026-08-30 (see Session Log): overlay UI v2, scroll pacing, SW export, stale-job liveness check, hidden-tab heartbeat, dev drawer, per-part card classification, two-phase detail visiting, SW address merge.
-- 2026-08-30 (round 2): premature-end fix + phase-2 session-destroy fix (spinner patience, settle window, health gates, slower pacing); test scenarios 4–7.
+- All fixes through 2026-08-30 (see Session Log): overlay UI v2, scroll pacing, SW export, stale-job liveness check, hidden-tab heartbeat, dev drawer, per-part card classification, two-phase detail visiting, SW address merge, slow-feed patience + phase-2 health gates.
+- 2026-08-30 (round 3): dead-Stop fix (keepalive + unconditional STOP + unknown-job DONE flush + restore hardening) and mid-list stall patience; new `tests/test-sw-stop.js`.
 
 ## In Progress
 - Nothing in code — awaiting live re-verification.
 
 ## Pending
-- User live verification round 2: slow pace observed, no DONE while the feed spinner is up, phase-2 visits drain (watch for `phase2-visit` vs `phase2-card-not-found` counts), clean CSV.
-- Reminder: a single Maps search caps around ~100–120 results; 500 targets need multiple narrower searches (potential future feature).
-- GitHub push on user's word (commits 08f71c3..0b2bce0 are local-only).
+- User live verification round 3: no silent freezes (keepalive), Stop always ends the run with an xlsx, phase-2 visits drain, clean CSV.
+- Reminder: a single Maps search caps around ~100–120 results; 500 targets need multiple narrower searches (potential future feature, [[07 Risks & Debt/Risks & Technical Debt|R-012]]).
+- GitHub push on user's word (commits 08f71c3..edb566d are local-only).
 
 ## Blocked
 - (none)
 
 ## Next Actions
-1. User: reload the unpacked extension, re-run the same search, watch the Events tab (`feed-loading-wait`, `feed-recovered-resume`, `phase2-*`).
-2. Compare lead count vs the previous 76 and the Phone/Website fill rate.
+1. User: reload the unpacked extension, re-run; watch for `[gmle] post … failed` warnings (should be none) and confirm Stop works mid-run.
+2. Compare lead counts and Phone/Website fill rates across the three runs.
 3. Push to GitHub when the user says.
 
 ## Last Verified
-2026-08-30 (mocked-DOM tests, 7 phase-2 scenarios + 3 other suites; live re-run pending)
+2026-08-30 (Node test suites incl. test-sw-stop; live re-run pending)

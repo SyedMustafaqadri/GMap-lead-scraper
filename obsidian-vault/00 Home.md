@@ -1,14 +1,18 @@
+---
+type: moc
+---
+
 # 00 Home — Google Maps Lead Extractor
 
 > Map of Content + Quick Context. Read this first every session. `obsidian-vault/` is the AI coding harness's memory of the project.
 
 ## Quick Context
 - **Project:** Private Chrome extension (Manifest V3) that extracts Google Maps leads → `.xlsx`.
-- **Status:** Two-phase detail scraping implemented; first live run surfaced two tail-end failures (premature end while Google's feed spinner was up; phase 2 destroying the search session) — **both fixed** (2026-08-30 round 2, commit `0b2bce0`, local only). Live re-verification pending.
-- **Current objective:** User live re-test: slower pace, no DONE while the feed spinner is up, phase-2 visits drain cleanly; then push on user's word.
+- **Status:** Three live-run issues found and fixed on 2026-08-30 (premature end on slow feed; phase 2 destroying the search session; dead Stop after SW suspension). Latest commit `edb566d`, local only. Live re-verification pending.
+- **Current objective:** User live re-test: no silent freezes (SW keepalive), Stop always ends with an xlsx, phase-2 visits drain, clean CSV; then push on user's word.
 - **Architecture style:** local-first Chrome MV3 extension (no backend).
 - **UI:** `overlay/` module (dormant content script, top-right panel + trigger button); export runs in the service worker; debug via `GMLE.DEV_MODE` flag in `modules/config.js`. See [[06 Modules/Overlay UI]].
-- **Extraction:** phase 1 scroll+extract with slow-feed patience (`feedSpinner`/`atBottom`, settle window); phase 2 visits each lead's detail panel via SPA clicks with health gates (`data-item-id` hooks) for phone/website/address — the old `fetch()` path was silently intercepted and removed ([[03 Decisions/Decision Log|D-007]]). Note: single Maps search caps at ~100–120 results ([[07 Risks & Debt/Risks & Technical Debt|R-012]]). Tests: `node tests/test-<name>.js` (mock DOM).
+- **Extraction:** phase 1 scroll+extract with slow-feed patience (`feedSpinner`/`atBottom`, settle window, force-glide to bottom on stall); phase 2 visits each lead's detail panel via SPA clicks with health gates (`data-item-id` hooks) for phone/website/address ([[03 Decisions/Decision Log|D-007]]). SW↔content link kept alive by a 20 s PING/PONG round trip (R-013). Single Maps search caps at ~100–120 results ([[07 Risks & Debt/Risks & Technical Debt|R-012]]). Tests: `node tests/test-<name>.js` (mock DOM).
 - **Source of truth:** `Specs.md` (repo root), until a [[03 Decisions/Decision Log|D-0XX]] decision overturns it (D-005 overturns the side-panel UI parts).
 - **Last Verified:** 2026-08-30 (Node test suites; live re-run pending)
 
@@ -22,6 +26,7 @@
 - [[02 Architecture/Architecture Map]] — system shape, component graph
 - [[02 Architecture/Components]] — Side Panel / Content Script / Service Worker
 - [[02 Architecture/Data Model]] — lead schema, IndexedDB, chrome.storage, checkpoints
+- [[02 Architecture/Maps DOM Reference]] — stable DOM hooks (feed cards + detail panel)
 
 ### Decisions
 - [[03 Decisions/Decision Log]] — numbered D-0XX decisions + rationale
