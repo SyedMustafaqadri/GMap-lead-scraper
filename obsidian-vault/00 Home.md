@@ -4,13 +4,13 @@
 
 ## Quick Context
 - **Project:** Private Chrome extension (Manifest V3) that extracts Google Maps leads → `.xlsx`.
-- **Status:** Two-phase detail scraping + per-part card classification **implemented and mocked-DOM tested** (2026-08-30, commit `cd2ad1c`, local only). Live-Maps verification pending.
-- **Current objective:** User live test — restaurant search to ~100 leads (clean Category/Address, populated Phone/Website), clinic regression, DONE-waits-for-visits; then push on user's word.
+- **Status:** Two-phase detail scraping implemented; first live run surfaced two tail-end failures (premature end while Google's feed spinner was up; phase 2 destroying the search session) — **both fixed** (2026-08-30 round 2, commit `0b2bce0`, local only). Live re-verification pending.
+- **Current objective:** User live re-test: slower pace, no DONE while the feed spinner is up, phase-2 visits drain cleanly; then push on user's word.
 - **Architecture style:** local-first Chrome MV3 extension (no backend).
 - **UI:** `overlay/` module (dormant content script, top-right panel + trigger button); export runs in the service worker; debug via `GMLE.DEV_MODE` flag in `modules/config.js`. See [[06 Modules/Overlay UI]].
-- **Extraction:** phase 1 scroll+extract (`content/content.js` loop); phase 2 visits each lead's detail panel via SPA clicks (`data-item-id` hooks) for phone/website/address — the old `fetch()` path was silently intercepted and removed ([[03 Decisions/Decision Log|D-007]]). Tests: `node tests/test-<name>.js` (mock DOM).
+- **Extraction:** phase 1 scroll+extract with slow-feed patience (`feedSpinner`/`atBottom`, settle window); phase 2 visits each lead's detail panel via SPA clicks with health gates (`data-item-id` hooks) for phone/website/address — the old `fetch()` path was silently intercepted and removed ([[03 Decisions/Decision Log|D-007]]). Note: single Maps search caps at ~100–120 results ([[07 Risks & Debt/Risks & Technical Debt|R-012]]). Tests: `node tests/test-<name>.js` (mock DOM).
 - **Source of truth:** `Specs.md` (repo root), until a [[03 Decisions/Decision Log|D-0XX]] decision overturns it (D-005 overturns the side-panel UI parts).
-- **Last Verified:** 2026-08-30 (Node test suites; live Maps run pending)
+- **Last Verified:** 2026-08-30 (Node test suites; live re-run pending)
 
 ## Map of Content
 

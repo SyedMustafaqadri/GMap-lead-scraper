@@ -32,11 +32,17 @@ The overlay is injected into a third-party page whose CSS and stacking contexts 
 ## R-008 — Orphaned job after mid-run hard navigation (Low)
 A hard navigation destroys the overlay/content script; `pagehide` posts `STOP`, but if that send fails the job idles until the SW watchdog (300 s) stops it. A reopened overlay rehydrates state, so impact is bounded. **Mitigation:** watchdog + rehydration; future: SW-side tab-liveness check. Status: open.
 
-## R-009 — Phase-2 click volume may trigger rate limiting (Medium, new 2026-08-30)
-Detail-panel visiting clicks one place per ~1.5–3 s after the feed run; a 100-lead job can mean ~100 rapid card openings. This raises CAPTCHA/throttling probability. **Mitigation:** random 1–2 s inter-visit delay, CAPTCHA detection + pause before every visit, DIAG progress per visit (`phase2-visit`). Status: open — verify on the live restaurant run; if throttled, raise `cfg.visit.delayMinMs/MaxMs`.
+## R-009 — Phase-2 click volume may trigger rate limiting (Medium)
+Detail-panel visiting clicks one place per ~2–4 s (raised from 1–2 s after the 2026-08-30 live run) after the feed run. **Mitigation:** random inter-visit delay, CAPTCHA detection + pause before every visit, DIAG progress per visit (`phase2-visit`). Status: partially mitigated — re-check fill rates on the next live run.
 
-## R-010 — Virtualized card anchors missing at phase 2 (Low, new 2026-08-30)
-Maps may virtualize feed cards away after long scrolls, so a lead's anchor may not be in the DOM when phase 2 runs. **Mitigation:** `findCardAnchor` retries once after scrolling the feed back to top; if still missing the lead is skipped with a `phase2-card-not-found` DIAG (blank phone/website survive per spec §30). Status: open — watch for skip counts in the debug drawer.
+## R-010 — Virtualized card anchors missing at phase 2 (Low)
+Maps may virtualize feed cards away after long scrolls, so a lead's anchor may not be in the DOM when phase 2 runs. **Mitigation:** `findCardAnchor` retries once after scrolling the feed back to top; if still missing the lead is skipped with a `phase2-card-not-found` DIAG. Status: open.
+
+## R-011 — Phase 2 can destroy the search session (High → mitigated 2026-08-30)
+Observed live: clicking into a **stalled** feed (Google's loader hung on its spinner) and closing the panel dropped the search context entirely — URL fell back to `/maps/@lat,lng`, empty feed, all remaining visits failed. **Mitigation (round 2):** phase 1 no longer ends while the spinner is up (spinner patience + 60 s settle window); `tryPhase2` health gate (never click a busy/dead feed); `waitFeedBack` requires the feed back **healthy** after each close and aborts cleanly with `phase2-feed-not-restored` if the session is lost. Status: mitigated — confirm on live re-run.
+
+## R-012 — Single-search result cap (~100–120 leads) (Medium, product constraint)
+Google Maps serves only ~100–120 results per search regardless of query size; a 500 target cannot be met by one search (observed on the Dallas run: 76 leads, feed stalled near the cap). **Future feature:** multi-search strategy (split by area/zip/zoom, merge + dedupe across searches). Not a bug — expectation setting.
 
 ## Resolved 2026-08-30 — detail-page `fetch()` silently intercepted
 The content-script `fetch()` detail-page path (added 2026-08-29 for phones) returned zero data with zero errors on the restaurant run (page SW/CSP interception). Removed entirely, replaced by two-phase UI visiting ([[03 Decisions/Decision Log|D-007]]). R-004 (enrichment hangs) unaffected — that covers SW-side website fetches.
