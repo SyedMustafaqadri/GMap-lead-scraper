@@ -11,10 +11,6 @@ GMLE.extractors = {
     // it so the name (and phase-2 panel matching) stays clean.
     var name = lines.length ? lines[0].replace(/\s*·\s*Visited link\s*$/i, '') : null;
     var ratingObj = this._rating(card);
-    // Lines joined with newline so the phone matcher can work per line —
-    // the phone occupies its own card line, which keeps it from gluing to
-    // adjacent street numbers.
-    var text = lines.join('\n');
     // Most reliable hook: tel: link, when the card exposes one.
     var telEl = card ? card.querySelector('a[href^="tel:"]') : null;
     var phone = telEl
@@ -27,11 +23,13 @@ GMLE.extractors = {
     // line-level filters leaked "4.7(4,699)" into Category and "Rs 1,000–7,000"
     // into Address (2026-08-30 live run).
     var category = null, address = null, statusPhone = null;
+    var fallbackLines = [];
     for (var i = 1; i < lines.length; i++) {
       var parts = lines[i].split('·').map(function (p) {
         return p.replace(/[★☆\uE000-\uF8FF]/g, '').trim();
       }).filter(function (p) { return p; });
       var hasStatus = parts.some(function (p) { return GMLE.extractors._isStatusPart(p); });
+      var hasAddress = false;
       for (var j = 0; j < parts.length; j++) {
         var p = parts[j];
         if (p === name) continue;
@@ -47,12 +45,19 @@ GMLE.extractors = {
           var ph = this._phoneFromText(p);
           if (ph) { statusPhone = ph; continue; }
         }
-        if (this._looksLikeAddress(p)) { if (!address) address = p; }
+        if (this._looksLikeAddress(p)) {
+          hasAddress = true;
+          if (!address) address = p;
+        }
         else if (!category) category = p;
       }
+      // The text-level phone fallback must never see address lines: a house
+      // number range like "36339-36343 S River Rd" would be captured as a
+      // false phone (Dinky Diner, 2026-08-31 restaurant run).
+      if (!hasAddress) fallbackLines.push(lines[i]);
     }
     if (!phone) phone = statusPhone;
-    if (!phone) phone = this._phoneFromText(text);
+    if (!phone) phone = this._phoneFromText(fallbackLines.join('\n'));
 
     return {
       name: name,

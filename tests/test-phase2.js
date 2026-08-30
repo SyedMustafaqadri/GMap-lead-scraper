@@ -133,6 +133,8 @@ harness.waitFor(function () {
 }).then(function () {
   return scenario8();
 }).then(function () {
+  return scenario9();
+}).then(function () {
   if (failed.length) { console.log('\nFAILED: ' + failed.join(', ')); process.exit(1); }
   console.log('\nALL PASS');
   process.exit(0);
@@ -418,5 +420,44 @@ function scenario8() {
       assert(!!env8.document.body.querySelector('div[role="main"]'), 'panel should remain (Escape ignored)');
       assert(done.payload.reason === 'end', done.payload.reason);
     });
+  });
+}
+
+// ---------------------------------------------------------------- scenario 9
+// Lead target reached: the SW sends FINISH — phase 1 stops collecting, the
+// visit queue drains (phones/websites fill), DONE carries reason 'target'.
+function scenario9() {
+  var env9 = makeEnv();
+  env9.document.body.innerText = 'Some page text, no end-of-list marker.';
+  env9.places = {
+    'https://www.google.com/maps/place/Alpha/1': { phoneText: '+92 21 33220642', website: 'https://alpha.example.com/' },
+    'https://www.google.com/maps/place/Beta/2': { phoneText: '+92 21 11111111', website: 'https://beta.example.com/' }
+  };
+  harness.buildFeed(env9, [
+    { name: 'Alpha', href: 'https://www.google.com/maps/place/Alpha/1', lines: ['Alpha', 'Dentist · Block 4'] },
+    { name: 'Beta', href: 'https://www.google.com/maps/place/Beta/2', lines: ['Beta', 'Dentist · Johar Hill'] }
+  ]);
+  env9.feed.children.forEach(function (card) {
+    card.children.forEach(function (ch) { if (ch.tagName === 'A') ch.onclick = harness.panelOpener(env9); });
+  });
+  env9.onSend = function (msg) {
+    // Simulate the SW: target (2) reached as soon as the first batch lands.
+    if (msg.type === 'LEADS_DISCOVERED') {
+      env9.handlers[0]({ type: env9.GMLE.MSG.FINISH, payload: { jobId: 'job_test' } });
+    }
+  };
+  harness.start(env9);
+  return harness.waitFor(function () {
+    var done = harness.msgOf(env9, 'DONE');
+    return done.length && done[done.length - 1];
+  }, 10000, 'DONE after target reached (scenario 9)').then(function (done) {
+    console.log('scenario 9 — target reached: FINISH drains phase 2 before export:');
+    var diags = harness.msgOf(env9, 'DIAG').map(function (m) { return m.payload.reason; });
+    var discovered = harness.msgOf(env9, 'LEADS_DISCOVERED').length;
+    var enriched = harness.msgOf(env9, 'LEADS_ENRICHED').length;
+    t('target-reached DIAG posted', function () { assert(diags.indexOf('target-reached') !== -1, diags.join(',')); });
+    t('phase 1 stopped collecting (single batch)', function () { assert(discovered === 1, 'batches=' + discovered); });
+    t('both visits drained (phones/websites filled)', function () { assert(enriched === 2, 'enriches=' + enriched); });
+    t('DONE carries the target reason', function () { assert(done.payload.reason === 'target', done.payload.reason); });
   });
 }

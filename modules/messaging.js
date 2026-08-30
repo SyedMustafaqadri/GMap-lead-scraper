@@ -5,6 +5,9 @@ GMLE.MSG = {
   START_EXTRACTION: 'START_EXTRACTION',
   START: 'START',
   STOP: 'STOP',
+  // Target reached: stop Phase 1 collecting but let Phase 2 enrich the
+  // collected queue before DONE (a hard STOP skips phones/websites entirely).
+  FINISH: 'FINISH',
   LEADS_DISCOVERED: 'LEADS_DISCOVERED',
   LEADS_ENRICHED: 'LEADS_ENRICHED',
   DONE: 'DONE',

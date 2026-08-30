@@ -209,7 +209,10 @@ function handleLeads(jobId, rawLeads) {
   checkpoint(job).catch(function (e) { GMLE.debug.log('error', 'checkpoint', String(e)); });
   if (job.targetLeads && job.leads.length >= job.targetLeads && job.status === GMLE.States.RUNNING) {
     setState(job, GMLE.States.STOPPING);
-    GMLE.postToTab(job.tabId, GMLE.MSG.STOP, {});
+    // FINISH, not STOP: the content script stops Phase 1 collecting and
+    // drains the phase-2 visit queue (phones/websites) before DONE — a hard
+    // STOP would export without ever running the visits.
+    GMLE.postToTab(job.tabId, GMLE.MSG.FINISH, { jobId: job.jobId });
   }
 }
 

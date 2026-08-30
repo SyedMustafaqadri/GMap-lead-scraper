@@ -20,6 +20,9 @@
   var visitQueue = [];
   var visitTotal = 0;
   var endReason = null;
+  // Set when the lead target is reached (FINISH): Phase 1 stops
+  // scrolling/collecting, but the visit queue (Phase 2) still drains.
+  var phase1Done = false;
   // Spinner patience: while the feed shows a loading indicator we are NOT in
   // a dead cycle — the next page is in flight (2026-08-30 run: Google's
   // loader hung on its spinner and the loop ended the job prematurely).
@@ -219,7 +222,7 @@
   function endOfFeed(reason) {
     if (!running) return;
     endReason = reason || 'end';
-    if (endReason === 'end') { tryPhase2(); return; }
+    if (endReason !== 'no-results') { tryPhase2(); return; }
     // 'no-results' — the feed may just be slow (spinner still up, next page
     // in flight). Give it one last window to settle: if the end-of-list
     // marker appears we continue to phase 2; if more results arrive we
@@ -510,7 +513,7 @@
   }
 
   function loop() {
-    if (!running) return;
+    if (!running || phase1Done) return;
 
     if (captchaPaused) {
       if (!detectCaptcha()) {
@@ -554,6 +557,7 @@
     });
 
     function waitDone(res) {
+      if (phase1Done) return; // FINISH arrived — phase 2 owns the run now
       loopCount++;
       if (loopCount % 3 === 0) GMLE.post(GMLE.MSG.DIAG, diag());
 
@@ -639,6 +643,7 @@
       visitQueue = [];
       visitTotal = 0;
       endReason = null;
+      phase1Done = false;
       loadingMs = 0;
       loadingDiag = false;
       noAnchorStreak = 0;
@@ -656,6 +661,14 @@
       running = false;
       visitQueue = []; // user asked to stop — drop pending detail visits
       GMLE.post(GMLE.MSG.DONE, { jobId: jobId, reason: 'stop' });
+    } else if (type === GMLE.MSG.FINISH) {
+      // Lead target reached: stop Phase 1 scrolling/collecting, then enrich
+      // the collected queue (phase 2 visits) before DONE + export.
+      if (running && payload.jobId === jobId && !phase1Done) {
+        phase1Done = true;
+        GMLE.post(GMLE.MSG.DIAG, Object.assign({ reason: 'target-reached' }, diag()));
+        endOfFeed('target');
+      }
     } else if (type === GMLE.MSG.LOOP_TICK) {
       // SW-side sleep finished (hidden-tab scheduling) — release the waiter.
       var waiter = tickWaiters[payload.tickId];

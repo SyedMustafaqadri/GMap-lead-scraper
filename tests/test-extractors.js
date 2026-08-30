@@ -44,13 +44,19 @@ var cafe = { name: 'Cafe X',
 var visited = { name: 'A-1 Auto Repair',
   href: 'https://www.google.com/maps/place/A-1+Auto+Repair/7',
   lines: ['A-1 Auto Repair · Visited link', 'Auto repair shop · 2025 Broadway'] };
+var dinky = { name: 'Dinky Diner',
+  href: 'https://www.google.com/maps/place/Dinky+Diner/8',
+  lines: ['Dinky Diner', 'Diner · 36339-36343 S River Rd', 'Closed · Opens 8 AM'] };
+var dinerWithPhone = { name: 'X Diner',
+  href: 'https://www.google.com/maps/place/X+Diner/9',
+  lines: ['X Diner', 'Diner · 123 Main St', 'Closed · Opens 8 AM · 0900 1234567'] };
 var sponsored = { name: 'Ad Cafe',
   href: 'https://www.google.com/maps/place/Ad+Cafe/6',
   lines: ['Ad Cafe', 'Restaurant · Some Rd 1'],
   sponsored: true,
   websiteHref: 'https://www.google.com/aclk?sa=l&adurl=https://ad.example.com' };
 
-harness.buildFeed(env, [rest, clinicA, clinicB, clinicC, cafe, sponsored, visited]);
+harness.buildFeed(env, [rest, clinicA, clinicB, clinicC, cafe, sponsored, visited, dinky, dinerWithPhone]);
 
 var L;
 var failed = [];
@@ -100,6 +106,20 @@ t('"· Visited link" suffix stripped from name', function () {
 });
 t('visited card data still parsed', function () {
   assert(L.category === 'Auto repair shop' && L.address === '2025 Broadway', L.category + '/' + L.address);
+});
+
+console.log('phone-vs-address disambiguation:');
+L = leadFor(env, dinky);
+t('address range digits NOT captured as phone (Dinky Diner)', function () {
+  assert(L.phone == null, 'phone=' + L.phone);
+});
+t('address still parsed', function () {
+  assert(L.address === '36339-36343 S River Rd', 'address=' + L.address);
+  assert(L.category === 'Diner', 'category=' + L.category);
+});
+L = leadFor(env, dinerWithPhone);
+t('real phone on a non-address line still captured', function () {
+  assert(L.phone === '09001234567', 'phone=' + L.phone);
 });
 
 L = leadFor(env, sponsored);

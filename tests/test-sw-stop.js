@@ -66,6 +66,19 @@ function t(name, fn) {
 }
 var router = global.__router;
 
+// --- 0. Target reached: FINISH (not STOP) so phase 2 can still drain -------
+var jt = GMLE.jobManager.create({ jobId: 'job_target', tabId: 3, targetLeads: 1, fields: GMLE.FIELDS });
+jt.status = GMLE.States.RUNNING;
+handleLeads('job_target', [{ name: 'Target Lead', mapsUrl: 'https://www.google.com/maps/place/Target/1' }]);
+console.log('target-reach state machine:');
+t('target reached sends FINISH (not STOP)', function () {
+  var fin = tabMessages.filter(function (m) { return m.tabId === 3 && m.type === GMLE.MSG.FINISH; });
+  var stp = tabMessages.filter(function (m) { return m.tabId === 3 && m.type === GMLE.MSG.STOP; });
+  if (fin.length !== 1) throw new Error('FINISH to tab3=' + fin.length);
+  if (stp.length) throw new Error('STOP sent to tab3');
+  if (JSON.stringify(fin[0].payload) !== JSON.stringify({ jobId: 'job_target' })) throw new Error(JSON.stringify(fin[0].payload));
+});
+
 // --- 1. STOP for an unknown job must still reach the tab -------------------
 router({ type: GMLE.MSG.STOP, payload: { jobId: 'job_gone' } }, { tab: { id: 7 } });
 setTimeout(function () {
