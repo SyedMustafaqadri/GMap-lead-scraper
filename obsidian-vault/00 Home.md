@@ -8,7 +8,7 @@ type: moc
 
 ## Quick Context
 - **Project:** Private Chrome extension (Manifest V3) that extracts Google Maps leads → `.xlsx`.
-- **Status:** Six live-run issues found and fixed across 2026-08-30/31; latest two: target-reached now runs phase 2 via FINISH (phones/websites fill before the automatic export) and address digits can no longer be captured as phones. Latest commit `b37d60f`, local only. Live re-verification pending.
+- **Status:** Six live-run issues found and fixed across 2026-08-30/31; latest two: target-reached now runs phase 2 via FINISH (phones/websites fill before the automatic export) and address digits can no longer be captured as phones. All work pushed to GitHub (main @ `1ae9ea9`, 2026-08-31); `GMLE.DEV_MODE` off for production use.
 - **Current objective:** User live re-test: every phase-2 visit must close via Escape (`closeMethod: escape` in the Events tab) with the `/maps/search/` route preserved, all visits drain, clean CSV; then push on user's word.
 - **Architecture style:** local-first Chrome MV3 extension (no backend).
 - **UI:** `overlay/` module (dormant content script, top-right panel + trigger button); export runs in the service worker; debug via `GMLE.DEV_MODE` flag in `modules/config.js`. See [[06 Modules/Overlay UI]].
