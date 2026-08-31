@@ -461,22 +461,28 @@
           return;
         }
         var updates = scrapePanel(lead);
-        if (updates.phone || updates.website || updates.address) {
-          GMLE.post(GMLE.MSG.LEADS_ENRICHED, { jobId: jobId, fp: GMLE.fingerprint(lead), updates: updates });
-        }
         continueToNextVisit(lead, updates);
       });
     });
   }
 
   // No close, no reset: the panel stays open; the next card click swaps its
-  // content. Only the visit bookkeeping happens here.
+  // content. LEADS_ENRICHED is posted on EVERY visit (even with empty
+  // updates) carrying visit progress — the SW relays it to the overlay's
+  // progress bar.
   function continueToNextVisit(lead, updates) {
     visitQueue.shift();
+    var index = visitTotal - visitQueue.length;
+    GMLE.post(GMLE.MSG.LEADS_ENRICHED, {
+      jobId: jobId,
+      fp: GMLE.fingerprint(lead),
+      updates: updates,
+      progress: { index: index, total: visitTotal, feedEnded: true }
+    });
     GMLE.post(GMLE.MSG.DIAG, Object.assign({
       reason: 'phase2-visit',
       name: lead.name,
-      index: visitTotal - visitQueue.length,
+      index: index,
       total: visitTotal,
       gotPhone: !!updates.phone,
       gotWebsite: !!updates.website,

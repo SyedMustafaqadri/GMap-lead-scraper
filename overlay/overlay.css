@@ -440,3 +440,61 @@
   .gm-trigger { transition: none; }
   .gm-panel:not([hidden]) { animation: none; }
 }
+
+/* ---- dual-phase progress bar -------------------------------------------- */
+.gm-pbar {
+  display: flex;
+  height: 8px;
+  border-radius: 4px;
+  background: #e8eaed;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+.gm-seg {
+  height: 100%;
+  width: 0;
+  transition: width .4s ease;
+}
+/* Phase 1 — lead collection (orange) */
+.gm-seg-collect { background: #f29900; }
+/* No target set: gentle indeterminate sweep instead of a fake percentage */
+.gm-seg-collect.indet {
+  width: 30% !important;
+  animation: gm-indet 1.8s ease-in-out infinite;
+}
+@keyframes gm-indet {
+  0%   { transform: translateX(-10%); opacity: .55; }
+  50%  { transform: translateX(240%); opacity: 1; }
+  100% { transform: translateX(-10%); opacity: .55; }
+}
+/* Phase 2 — detail-panel enrichment (blue) */
+.gm-seg-visit { background: #1a73e8; }
+
+.gm-phase-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: #5f6368;
+  margin-top: 4px;
+}
+.gm-phase-line .gm-pl-name {
+  font-weight: 600;
+  color: #3c4043;
+  min-width: 96px;
+}
+.gm-phase-line .gm-pl-val { font-variant-numeric: tabular-nums; }
+.gm-phase-line .gm-pl-eta {
+  margin-left: auto;
+  color: #1a73e8;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.gm-note {
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: #a56300;
+  background: #fef7e0;
+  border-radius: 6px;
+  padding: 4px 8px;
+}

@@ -137,6 +137,7 @@ function buildDebugSnapshot() {
         savedCount: job.savedCount,
         duplicates: job.duplicateCount,
         enrichment: job.enrichment,
+        track: job.track,
         lastLeadName: job.lastLeadName,
         fields: job.fields
       } : null
@@ -155,6 +156,7 @@ function setState(job, to) {
 }
 
 function statusPayload(job) {
+  var t = job.track || { phase: 'collect', visitIndex: 0, visitTotal: 0, feedEnded: false };
   return {
     jobId: job.jobId,
     state: job.status,
@@ -162,7 +164,12 @@ function statusPayload(job) {
     duplicates: job.duplicateCount,
     enrichment: job.enrichment,
     target: job.targetLeads,
-    lastLeadName: job.lastLeadName
+    lastLeadName: job.lastLeadName,
+    // Dual-phase progress (overlay progress bar):
+    phase: t.phase,
+    visitIndex: t.visitIndex,
+    visitTotal: t.visitTotal,
+    feedEnded: t.feedEnded
   };
 }
 
@@ -483,8 +490,19 @@ GMLE.onMessage(function (msg, sender) {
 // phase-2 visit drain (visits can outlast idleTimeoutMs with no new leads).
 function handleLeadEnriched(payload) {
   var job = GMLE.jobManager.get(payload.jobId);
-  if (!job || !payload.updates) return;
+  if (!job) return;
   job.lastLeadTs = Date.now();
+  // Visit progress (posted on every panel visit, even with empty updates) —
+  // drives the overlay's phase-2 progress bar.
+  if (payload.progress) {
+    var t = job.track || (job.track = { phase: 'collect', visitIndex: 0, visitTotal: 0, feedEnded: false });
+    t.phase = 'visit';
+    t.visitIndex = payload.progress.index || t.visitIndex;
+    t.visitTotal = payload.progress.total || t.visitTotal;
+    t.feedEnded = t.feedEnded || !!payload.progress.feedEnded;
+    GMLE.postToTab(job.tabId, GMLE.MSG.STATUS_UPDATE, statusPayload(job));
+  }
+  if (!payload.updates) return;
   var lead = job.leads.filter(function (l) { return l.fingerprint === payload.fp; })[0];
   if (!lead) return;
   var touched = false;

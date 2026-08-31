@@ -85,12 +85,21 @@ harness.waitFor(function () {
     assert(done === env.messages[env.messages.length - 1], 'DONE must be the last message');
     assert(done.payload.reason === 'end', 'reason=' + done.payload.reason);
   });
-  t('3 enriches in extract order (skips excluded)', function () {
-    assert(enriched.length === 3, 'got ' + enriched.length);
-    assert(enriched[0].payload.updates.phone === '+922133220642', 'alpha phone');
-    assert(enriched[1].payload.updates.phone === '03312048149', 'beta phone');
-    assert(!enriched[2].payload.updates.phone, 'gamma had card phone — not re-sent');
-    assert(enriched[2].payload.updates.website === 'https://gamma.example.com/', 'gamma website');
+  t('3 data enriches in extract order (skips excluded)', function () {
+    // Every visit posts LEADS_ENRICHED now (progress tracking), so the
+    // dead-panel lead contributes an empty-updates progress message.
+    var data = enriched.filter(function (m) {
+      var u = m.payload.updates || {};
+      return u.phone || u.website || u.address;
+    });
+    assert(data.length === 3, 'data enriches=' + data.length + ' total=' + enriched.length);
+    assert(data[0].payload.updates.phone === '+922133220642', 'alpha phone');
+    assert(data[1].payload.updates.phone === '03312048149', 'beta phone');
+    assert(!data[2].payload.updates.phone, 'gamma had card phone — not re-sent');
+    assert(data[2].payload.updates.website === 'https://gamma.example.com/', 'gamma website');
+    var last = enriched[enriched.length - 1].payload;
+    assert(last.progress && last.progress.index === 5 && last.progress.total === 5,
+      'progress payload on empty visit: ' + JSON.stringify(last.progress));
   });
   t('missing card skipped with DIAG, no enrich', function () {
     assert(diags.indexOf('phase2-card-not-found') !== -1, 'no card-not-found diag');

@@ -37,6 +37,34 @@ if (!GMLE.__overlayLoaded) {
     var debugMounted = false;
     var ui = null;
 
+    // ---- dual-phase progress tracking (rolling averages, overlay-side) ----
+    var leadTs = [];        // timestamps of the last ~10 lead arrivals
+    var visitTs = [];       // timestamps of the last ~10 panel visits
+    var lastTotal = 0;
+    var lastVisitIndex = 0;
+    var lastJobId = null;
+    var lastUpdateTs = 0;
+
+    function resetProgress() {
+      leadTs = [];
+      visitTs = [];
+      lastTotal = 0;
+      lastVisitIndex = 0;
+      lastUpdateTs = 0;
+    }
+
+    function avgMs(arr) {
+      return arr.length >= 2 ? (arr[arr.length - 1] - arr[0]) / (arr.length - 1) : null;
+    }
+
+    function fmtEta(ms) {
+      if (ms == null || !isFinite(ms) || ms <= 0) return '';
+      var m = ms / 60000;
+      if (m < 1) return '~<1 min left';
+      if (m < 60) return '~' + Math.max(1, Math.round(m)) + ' min left';
+      return '~' + (Math.round(m / 6) / 10) + ' h left';
+    }
+
     GMLE.storage.getSettings().then(function (s) {
       if (!s) return;
       if (typeof s.targetLeads === 'number') settings.targetLeads = s.targetLeads;
@@ -81,6 +109,13 @@ if (!GMLE.__overlayLoaded) {
           '</div>' +
           '<button class="gm-primary">Start extraction</button>' +
           '<div class="gm-card gm-progress" hidden>' +
+            '<div class="gm-pbar" title="Orange: collecting leads · Blue: visiting detail panels">' +
+              '<div class="gm-seg gm-seg-collect"></div>' +
+              '<div class="gm-seg gm-seg-visit"></div>' +
+            '</div>' +
+            '<div class="gm-phase-line"><span class="gm-pl-name">Collecting</span><span class="gm-pl-val gm-pl-collect-val"></span><span class="gm-pl-eta gm-pl-collect-eta"></span></div>' +
+            '<div class="gm-phase-line"><span class="gm-pl-name">Visiting details</span><span class="gm-pl-val gm-pl-visit-val"></span><span class="gm-pl-eta gm-pl-visit-eta"></span></div>' +
+            '<div class="gm-note" hidden></div>' +
             '<div class="gm-metrics">' +
               '<div class="gm-metric leads"><span class="val gm-leadval">0</span><span class="lbl">Leads</span></div>' +
               '<div class="gm-metric"><span class="val gm-dup">0</span><span class="lbl">Duplicates</span></div>' +
@@ -135,6 +170,13 @@ if (!GMLE.__overlayLoaded) {
         errorLine: $('.gm-error-line'),
         primary: $('.gm-primary'),
         progress: $('.gm-progress'),
+        pbarCollect: $('.gm-seg-collect'),
+        pbarVisit: $('.gm-seg-visit'),
+        plCollectVal: $('.gm-pl-collect-val'),
+        plCollectEta: $('.gm-pl-collect-eta'),
+        plVisitVal: $('.gm-pl-visit-val'),
+        plVisitEta: $('.gm-pl-visit-eta'),
+        note: $('.gm-note'),
         mLeads: $('.gm-leadval'),
         mDups: $('.gm-dup'),
         mEnrich: $('.gm-enrich'),
@@ -152,6 +194,8 @@ if (!GMLE.__overlayLoaded) {
       mountDebug();
       applySettings();
       render();
+      // Refresh ETAs / stall labels even when no message arrives.
+      setInterval(function () { if (isRunning()) renderProgress(); }, 1000);
     }
 
     function buildFields() {
@@ -279,6 +323,73 @@ if (!GMLE.__overlayLoaded) {
         ui.mEnrich.textContent = (status.enrichment ? status.enrichment.done : 0) +
           ' / ' + (status.enrichment ? status.enrichment.queued : 0);
         ui.current.textContent = status.lastLeadName ? 'Current: ' + status.lastLeadName : '';
+        renderProgress();
+      }
+    }
+
+    // ---- dual-phase progress bar ---------------------------------------------
+    // One unified bar: orange = phase 1 weight (collected ÷ target), blue =
+    // phase 2 weight (visited ÷ visit queue). ETAs are rolling averages of
+    // the last ~10 items, computed here in the overlay. Status overrides:
+    // CAPTCHA pauses, feed stalls show "waiting", feedEnded snaps phase 1
+    // to completion at the actual collected count.
+    function renderProgress() {
+      if (!ui || !status) return;
+      var feedEnded = !!status.feedEnded;
+      var target = status.target || 0;
+      var total = status.total || 0;
+      var visitIndex = status.visitIndex || 0;
+      var visitTotal = status.visitTotal || 0;
+      var runningNow = isRunning();
+
+      // Phase 1: when the feed is exhausted the effective target becomes the
+      // actual collected count (e.g. 123 of a 500 target) — orange snaps to
+      // 100% and the note explains why.
+      var effTarget = feedEnded && total > 0 ? total : target;
+      var p1 = effTarget ? Math.min(total / effTarget, 1) : 0;
+      var indeterminate = !target && !feedEnded && runningNow;
+      ui.pbarCollect.classList.toggle('indet', indeterminate);
+      ui.pbarCollect.style.width = indeterminate ? '' : (p1 * 100).toFixed(1) + '%';
+
+      var p2 = visitTotal ? Math.min(visitIndex / visitTotal, 1) : 0;
+      ui.pbarVisit.style.width = (p2 * 100).toFixed(1) + '%';
+
+      var exhausted = feedEnded && target && total < target;
+      ui.note.hidden = !exhausted;
+      if (exhausted) ui.note.textContent = 'Search exhausted at ' + total + ' leads';
+
+      // Phase 1 line: count + ETA
+      ui.plCollectVal.textContent = target
+        ? total + ' / ' + (feedEnded ? total : target)
+        : total + ' leads';
+      var eta1;
+      if (state === States.CAPTCHA) eta1 = 'paused — solve captcha';
+      else if (feedEnded || (target && total >= target)) eta1 = 'done';
+      else if (target && total > 0) {
+        if (runningNow && lastUpdateTs && Date.now() - lastUpdateTs > 20000) {
+          eta1 = 'waiting for results…';
+        } else {
+          var r1 = avgMs(leadTs);
+          eta1 = fmtEta(r1 ? (target - total) * r1 : null) || 'estimating…';
+        }
+      } else if (runningNow) eta1 = 'searching…';
+      else eta1 = '';
+      ui.plCollectEta.textContent = eta1;
+
+      // Phase 2 line: count + ETA
+      if (visitTotal) {
+        ui.plVisitVal.textContent = visitIndex + ' / ' + visitTotal;
+        var eta2;
+        if (state === States.CAPTCHA) eta2 = 'paused — solve captcha';
+        else if (visitIndex >= visitTotal) eta2 = 'done';
+        else {
+          var r2 = avgMs(visitTs);
+          eta2 = fmtEta(r2 ? (visitTotal - visitIndex) * r2 : null) || 'estimating…';
+        }
+        ui.plVisitEta.textContent = eta2;
+      } else {
+        ui.plVisitVal.textContent = runningNow ? 'pending' : '0 / 0';
+        ui.plVisitEta.textContent = '';
       }
     }
 
@@ -323,6 +434,7 @@ if (!GMLE.__overlayLoaded) {
         render();
       } else if (type === GMLE.MSG.STATE_CHANGED) {
         currentJobId = p.jobId;
+        if (p.jobId !== lastJobId) { lastJobId = p.jobId; resetProgress(); }
         state = p.state || States.IDLE;
         ui.errorLine.hidden = true;
         render();
@@ -331,6 +443,22 @@ if (!GMLE.__overlayLoaded) {
         ui.errorLine.hidden = false;
       } else if (type === GMLE.MSG.STATUS_UPDATE) {
         currentJobId = p.jobId;
+        if (p.jobId !== lastJobId) { lastJobId = p.jobId; resetProgress(); }
+        if (typeof p.total === 'number') {
+          if (p.total < lastTotal) resetProgress(); // new/rewound job
+          if (p.total > lastTotal) {
+            leadTs.push(Date.now());
+            if (leadTs.length > 10) leadTs.shift();
+          }
+          lastTotal = p.total;
+        }
+        var vi = p.visitIndex || 0;
+        if (vi > lastVisitIndex) {
+          visitTs.push(Date.now());
+          if (visitTs.length > 10) visitTs.shift();
+        }
+        lastVisitIndex = vi;
+        lastUpdateTs = Date.now();
         status = p;
         state = p.state || state;
         render();

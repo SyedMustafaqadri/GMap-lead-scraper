@@ -28,6 +28,10 @@ GMLE.jobManager = (function () {
       lastLeadTs: Date.now(),
       duplicateCount: 0,
       enrichment: { queued: 0, done: 0, emails: 0 },
+      // Dual-phase progress tracking (overlay progress bar): phase 1 =
+      // collecting leads, phase 2 = visiting detail panels. visitIndex/
+      // visitTotal are updated by LEADS_ENRICHED progress payloads.
+      track: { phase: 'collect', visitIndex: 0, visitTotal: 0, feedEnded: false },
       lastLeadName: ''
     };
     jobs.set(job.jobId, job);
