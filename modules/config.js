@@ -75,4 +75,4 @@ GMLE.FIELDS = [
 ];
 
 GMLE.DEMO_MODE = false;
-GMLE.DEV_MODE = true;
+GMLE.DEV_MODE = false;
